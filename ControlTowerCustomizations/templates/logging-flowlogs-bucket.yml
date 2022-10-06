@@ -1,0 +1,50 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: S3 bucket used for VPC Flowlogs
+
+Resources:
+  S3BucketLogs:
+    Type: AWS::S3::Bucket
+    Properties:
+      VersioningConfiguration:
+        Status: Enabled
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      LifecycleConfiguration:
+        Rules:
+          - Id: DeleteContentAfter30Days
+            ExpirationInDays: 30
+            Status: Enabled
+            Prefix: ''
+
+  S3BucketLogsPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties: 
+      Bucket: !Ref S3BucketLogs
+      PolicyDocument:
+        Statement:
+        - Sid: AWSLogDeliveryWrite
+          Effect: Allow
+          Principal:
+            Service: delivery.logs.amazonaws.com
+          Action: s3:PutObject
+          Resource: !Join 
+              - ""
+              - - !GetAtt S3BucketLogs.Arn
+                - "/*"
+        - Sid: AWSLogDeliveryAclCheck
+          Effect: Allow
+          Principal:
+            Service: delivery.logs.amazonaws.com
+          Action: s3:GetBucketAcl
+          Resource: !GetAtt S3BucketLogs.Arn
+
+Outputs:
+  BucketName:
+    Description: VPC Flow Log Bucket name
+    Value: !Ref S3BucketLogs
+
+  BucketURL:
+    Description: VPC Flow Log Bucket URL
+    Value: !Sub https://${S3BucketLogs.RegionalDomainName}

@@ -1,0 +1,69 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: Central Network Cross Account Roles
+
+Parameters:
+  TagShareRoleName:
+    Type: String
+    Description: Role name of the lambda to give trust to for network tag share
+    Default: central-network-share-tag-automator
+  DNSAssociationRoleName:
+    Type: String
+    Description: Role name of the lambda to give trust to for network tag share
+    Default: central-network-dns-associator
+  NetworkAccountID:
+    Type: String
+    Description: The Account ID for Network Account
+
+Resources:
+  CnNetworkDNSAssociationAutomatorMemberRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS:
+                - !Sub arn:aws:iam::${NetworkAccountID}:role/${DNSAssociationRoleName}-${AWS::Region}
+            Action: sts:AssumeRole
+      Path: /
+      RoleName: !Sub central-network-dns-associator-member-role-${AWS::Region}
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole
+      Policies:
+        - PolicyName: Route53Ops
+          PolicyDocument:
+            Statement:
+              - Effect: Allow
+                Action:
+                  - route53:CreateVPCAssociationAuthorization
+                  - route53:ListVPCAssociationAuthorization
+                  - route53:DeleteVPCAssociationAuthorization
+
+                Resource: "*"
+  CnNetworkShareTagAutomatorMemberRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS:
+                - !Sub arn:aws:iam::${NetworkAccountID}:role/${TagShareRoleName}-${AWS::Region}
+            Action: sts:AssumeRole
+      Path: /
+      RoleName: !Sub cn-network-share-tag-member-role-${AWS::Region}
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole
+      Policies:
+        - PolicyName: AllowVPCDescribeAndTagging
+          PolicyDocument:
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ec2:DescribeVpcs
+                  - ec2:CreateTags
+                  - ec2:DescribeSubnets
+                  - ec2:DescribeRouteTables
+                Resource: "*"

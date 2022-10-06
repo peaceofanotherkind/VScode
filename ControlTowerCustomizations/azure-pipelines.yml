@@ -1,0 +1,322 @@
+trigger:
+  batch: true
+  branches:
+    include:
+      - Support_DevInt # Dev
+      - Support # Prod
+
+variables:
+  - group: globals
+  - name: region
+    value: us-east-1
+
+  # DEV Variables
+  - ${{ if eq(variables['Build.SourceBranch'], 'refs/heads/Support_DevInt') }}:
+      - name: pool_name
+        value: $(DEV_POOL_NAME)
+      - name: env
+        value: development
+      - name: container_tag
+        value: $(DEV_TAG_NAME_CCT)
+      - name: ss_account_id
+        value: $(DEV_SS_ACCOUNT_ID)
+
+  # PROD Variables
+  - ${{ if eq(variables['Build.SourceBranch'], 'refs/heads/Support') }}:
+      - name: pool_name
+        value: $(PROD_POOL_NAME)
+      - name: env
+        value: production
+      - name: container_tag
+        value: $(PROD_TAG_NAME_CCT)
+      - name: ss_account_id
+        value: $(PROD_SS_ACCOUNT_ID)
+
+pool: $(pool_name)
+
+stages:
+  - stage: packaging
+    jobs:
+      - job: generatePackage
+        container:
+          image: $(ss_account_id).dkr.ecr.$(region).amazonaws.com/ct-customizations-pipeline:$(container_tag)
+        displayName: Packaging for ${{ variables.env }}
+        steps:
+          - script: | 
+              mv manifest-$(env).yaml manifest.yaml
+              zip -r custom-control-tower-configuration.zip *
+          - publish: $(System.DefaultWorkingDirectory)/custom-control-tower-configuration.zip
+            artifact: $(Build.Repository.Name)-$(Build.SourceBranchName)-$(Build.BuildNumber)-$(Build.SourceVersion)
+
+  - stage: deploy
+    jobs:
+      - deployment: DeployTagPolicy
+        container:
+          image: $(ss_account_id).dkr.ecr.$(region).amazonaws.com/ct-customizations-pipeline:$(container_tag)
+        displayName: Deploy Tag Policies to ${{ variables.env }}
+        continueOnError: false
+        environment: ${{ variables.env }}
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - task: DownloadPipelineArtifact@2
+                  inputs:
+                    source: current
+                    artifact: $(Build.Repository.Name)-$(Build.SourceBranchName)-$(Build.BuildNumber)-$(Build.SourceVersion)
+                    path: $(System.DefaultWorkingDirectory)
+                - script: |
+
+                    export ACCOUNT_ID=`cat deployment-$(env).yml | yq .masterAccountId`
+                    echo $ACCOUNT_ID
+
+                    export AWS_DEFAULT_REGION=`cat deployment-$(env).yml | yq -r .region`
+                    echo $AWS_DEFAULT_REGION
+
+                    export BUCKET_NAME=`cat deployment-$(env).yml | yq -r .bucketName`
+                    echo $BUCKET_NAME
+
+                    export KMS_KEY_ID=`cat deployment-$(env).yml | yq -r .kmsKeyId`
+                    echo $KMS_KEY_ID
+
+
+                    export ROLE="arn:aws:iam::$ACCOUNT_ID:role/AzureDevOpsMemberRole"
+
+                    echo "===== assuming permissions => $ROLE ====="
+                    account_role=`aws sts assume-role --role-arn $ROLE --role-session-name "AzureDevOps-cowabunga-$(Build.SourceVersion)"`
+
+
+                    export AWS_ACCESS_KEY_ID=$(echo $account_role | jq -r .Credentials.AccessKeyId)
+                    echo $AWS_ACCESS_KEY_ID
+                    export AWS_SECRET_ACCESS_KEY=$(echo $account_role | jq -r .Credentials.SecretAccessKey)
+                    echo $AWS_SECRET_ACCESS_KEY
+                    export AWS_SESSION_TOKEN=$(echo $account_role | jq -r .Credentials.SessionToken)
+                    echo $AWS_SESSION_TOKEN
+
+
+                    ROOT_ID=$(aws organizations list-roots | jq -c -r '.Roots[0].Id')
+                    echo $ROOT_ID
+                    ORG_UNITS=$(aws organizations list-organizational-units-for-parent --parent-id $ROOT_ID)
+                    echo $ORG_UNITS
+
+                    list_policies=$(aws organizations list-policies --filter TAG_POLICY)
+
+                    for tag_policy in $(echo "${list_policies}" | jq -r '.Policies[] | @base64'); do
+                      _tag_policy() {
+                        echo ${tag_policy} | base64 --decode | jq -r ${1}
+                      } 
+                      policy_id=$(_tag_policy '.Id')
+                      echo $policy_id
+                      targets=$(aws organizations list-targets-for-policy --policy-id $policy_id)
+
+                      for target in $(echo "${targets}" | jq -r '.Targets[] | @base64'); do
+                        _target() {
+                          echo ${target} | base64 --decode | jq -r ${1}
+                        }
+
+                        target_id=$(_target '.TargetId')
+                        echo "detaching policy $policy_id from target $target_id"
+                        aws organizations detach-policy --policy-id $policy_id --target-id $target_id
+                      done                  
+                      echo "deleting policy $policy_id"
+                      aws organizations delete-policy --policy-id $policy_id
+                    done
+                          
+
+                    for row in $( cat scf_manifest.yml | yq -r '.tag_policies[] | @base64'); do
+                      _jq() {
+                        echo ${row} | base64 --decode | jq -r ${1}
+                      }  
+                      name=$(_jq '.name')
+                      description=$(_jq '.description')
+                      policy_file=$(_jq '.policy_file')
+                      apply_to_accounts_in_ou=$(_jq '.apply_to_accounts_in_ou')
+                      
+                      echo $name
+                      echo $description
+                      echo $policy_file
+                      echo $apply_to_accounts_in_ou
+
+                      echo "creating policy $name"
+                      response=$(aws organizations create-policy --name $name --type TAG_POLICY --description "$description" --content file://./$policy_file 2>&1)
+                      
+                      echo $response
+                      policy_id=$(jq -r .Policy.PolicySummary.Id <<< "$response")
+
+                      for ou in $(echo "${apply_to_accounts_in_ou}" | jq -r '.[] | @base64'); do
+                        _ou() {
+                          echo ${ou} | base64 --decode
+                        } 
+                        echo $(_ou)
+                        echo $policy_id
+                        decoded_ou=$(_ou)
+                        echo $decoded_ou
+                        echo $ORG_UNITS
+                        ou_id=$(jq --arg ou "$decoded_ou" -r '.OrganizationalUnits[] | select(.Name==$ou) | .Id' <<< "$ORG_UNITS")
+                        echo $ou_id
+                        echo "attaching policy $policy_id to target ou $ou_id"
+                        aws organizations attach-policy --policy-id $policy_id --target-id $ou_id
+                      done         
+                    done
+
+      - deployment: DeployBackupPolicy
+        displayName: Deploy Backup Policies to ${{ variables.env }}
+        container:
+          image: $(ss_account_id).dkr.ecr.$(region).amazonaws.com/ct-customizations-pipeline:$(container_tag)
+        continueOnError: false
+        environment: ${{ variables.env }}
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - task: DownloadPipelineArtifact@2
+                  inputs:
+                    source: current
+                    artifact: $(Build.Repository.Name)-$(Build.SourceBranchName)-$(Build.BuildNumber)-$(Build.SourceVersion)
+                    path: $(System.DefaultWorkingDirectory)
+                - script: |
+
+                    export ACCOUNT_ID=`cat deployment-$(env).yml | yq .masterAccountId`
+                    echo $ACCOUNT_ID
+
+                    export AWS_DEFAULT_REGION=`cat deployment-$(env).yml | yq -r .region`
+                    echo $AWS_DEFAULT_REGION
+
+                    export BUCKET_NAME=`cat deployment-$(env).yml | yq -r .bucketName`
+                    echo $BUCKET_NAME
+
+                    export KMS_KEY_ID=`cat deployment-$(env).yml | yq -r .kmsKeyId`
+                    echo $KMS_KEY_ID
+
+
+                    export ROLE="arn:aws:iam::$ACCOUNT_ID:role/AzureDevOpsMemberRole"
+
+                    echo "===== assuming permissions => $ROLE ====="
+                    account_role=`aws sts assume-role --role-arn $ROLE --role-session-name "AzureDevOps-cowabunga-$(Build.SourceVersion)"`
+
+
+                    export AWS_ACCESS_KEY_ID=$(echo $account_role | jq -r .Credentials.AccessKeyId)
+                    echo $AWS_ACCESS_KEY_ID
+                    export AWS_SECRET_ACCESS_KEY=$(echo $account_role | jq -r .Credentials.SecretAccessKey)
+                    echo $AWS_SECRET_ACCESS_KEY
+                    export AWS_SESSION_TOKEN=$(echo $account_role | jq -r .Credentials.SessionToken)
+                    echo $AWS_SESSION_TOKEN
+
+
+                    ROOT_ID=$(aws organizations list-roots | jq -c -r '.Roots[0].Id')
+                    echo $ROOT_ID
+                    ORG_UNITS=$(aws organizations list-organizational-units-for-parent --parent-id $ROOT_ID)
+                    echo $ORG_UNITS
+
+
+                    list_policies=$(aws organizations list-policies --filter BACKUP_POLICY)
+
+                    for backup_policy in $(echo "${list_policies}" | jq -r '.Policies[] | @base64'); do
+                      _backup_policy() {
+                        echo ${backup_policy} | base64 --decode | jq -r ${1}
+                      } 
+                      policy_id=$(_backup_policy '.Id')
+                      echo $policy_id
+                      targets=$(aws organizations list-targets-for-policy --policy-id $policy_id)
+
+                      for target in $(echo "${targets}" | jq -r '.Targets[] | @base64'); do
+                        _target() {
+                          echo ${target} | base64 --decode | jq -r ${1}
+                        }
+
+                        target_id=$(_target '.TargetId')
+                        echo "detaching policy $policy_id from target $target_id"
+                        aws organizations detach-policy --policy-id $policy_id --target-id $target_id
+                      done                  
+                      echo "deleting policy $policy_id"
+                      aws organizations delete-policy --policy-id $policy_id
+                    done
+
+                    for row in $( cat scf_manifest.yml | yq -r '.backup_policies[] | @base64'); do
+                      _jq() {
+                        echo ${row} | base64 --decode | jq -r ${1}
+                      }  
+                      name=$(_jq '.name')
+                      description=$(_jq '.description')
+                      policy_file=$(_jq '.policy_file')
+                      apply_to_accounts_in_ou=$(_jq '.apply_to_accounts_in_ou')
+                      
+                      echo $name
+                      echo $description
+                      echo $policy_file
+                      echo $apply_to_accounts_in_ou
+
+                      echo "creating policy $name"
+                      response=$(aws organizations create-policy --name $name --type BACKUP_POLICY --description "$description" --content file://./$policy_file 2>&1)
+                      
+                      echo $response
+                      policy_id=$(jq -r .Policy.PolicySummary.Id <<< "$response")
+
+                      for ou in $(echo "${apply_to_accounts_in_ou}" | jq -r '.[] | @base64'); do
+                        _ou() {
+                          echo ${ou} | base64 --decode
+                        } 
+                        echo $(_ou)
+                        echo $policy_id
+                        decoded_ou=$(_ou)
+                        echo $decoded_ou
+                        echo $ORG_UNITS
+                        ou_id=$(jq --arg ou "$decoded_ou" -r '.OrganizationalUnits[] | select(.Name==$ou) | .Id' <<< "$ORG_UNITS")
+                        echo $ou_id
+                        echo "attaching policy $policy_id to target ou $ou_id"
+                        aws organizations attach-policy --policy-id $policy_id --target-id $ou_id
+
+
+                      done
+                      
+                      
+                    done
+
+      - deployment: DeployToEnv
+        displayName: Deploy to ${{ variables.env }}
+        container:
+          image: $(ss_account_id).dkr.ecr.$(region).amazonaws.com/ct-customizations-pipeline:$(container_tag)
+        dependsOn: DeployBackupPolicy
+        continueOnError: false
+        environment: ${{ variables.env }}
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - task: DownloadPipelineArtifact@2
+                  inputs:
+                    source: current
+                    artifact: $(Build.Repository.Name)-$(Build.SourceBranchName)-$(Build.BuildNumber)-$(Build.SourceVersion)
+                    path: $(System.DefaultWorkingDirectory)
+                - script: |
+                    export ACCOUNT_ID=`cat deployment-$(env).yml | yq .masterAccountId`
+                    echo $ACCOUNT_ID
+
+                    export AWS_DEFAULT_REGION=`cat deployment-$(env).yml | yq -r .region`
+                    echo $AWS_DEFAULT_REGION
+
+                    export BUCKET_NAME=`cat deployment-$(env).yml | yq -r .bucketName`
+                    echo $BUCKET_NAME
+
+                    export KMS_KEY_ID=`cat deployment-$(env).yml | yq -r .kmsKeyId`
+                    echo $KMS_KEY_ID
+
+
+                    export ROLE="arn:aws:iam::$ACCOUNT_ID:role/AzureDevOpsMemberRole"
+
+                    echo "===== assuming permissions => $ROLE ====="
+                    account_role=`aws sts assume-role --role-arn $ROLE --role-session-name "AzureDevOps-cowabunga-$(Build.SourceVersion)"`
+
+
+                    export AWS_ACCESS_KEY_ID=$(echo $account_role | jq -r .Credentials.AccessKeyId)
+                    echo $AWS_ACCESS_KEY_ID
+                    export AWS_SECRET_ACCESS_KEY=$(echo $account_role | jq -r .Credentials.SecretAccessKey)
+                    echo $AWS_SECRET_ACCESS_KEY
+                    export AWS_SESSION_TOKEN=$(echo $account_role | jq -r .Credentials.SessionToken)
+                    echo $AWS_SESSION_TOKEN
+                    export AWS_SECURITY_TOKEN=$(echo $account_role | jq -r .Credentials.SessionToken)
+                    echo $AWS_SECURITY_TOKEN
+
+
+                    aws s3 ls
+                    aws s3 cp custom-control-tower-configuration.zip s3://$BUCKET_NAME/custom-control-tower-configuration.zip --sse "aws:kms" --sse-kms-key-id $KMS_KEY_ID

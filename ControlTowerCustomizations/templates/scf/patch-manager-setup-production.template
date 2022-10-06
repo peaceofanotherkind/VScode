@@ -1,0 +1,680 @@
+---
+AWSTemplateFormatVersion: 2010-09-09
+Description: "AWS SSM Patch Management Setup for the Production Environment"
+
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterLabels:
+      OrgId:
+        default: Organization ID
+      SharedServicesAccountId:
+        default: Main Account ID
+      BridgestoneEmailDL:
+        default: Bridgestone Email DL
+ 
+Parameters:
+  SharedServicesAccountId:
+    Description: >-
+      Account ID of which the Custom Resource Helper Lambda (patch-management-lambda.yml) was deployed (i.e. Shared Services Account or Master Account etc.. )
+    Type: String
+  OrgId:
+    Description: AWS Root Organization ID
+    Type: String
+  BridgestoneEmailDL:
+    Description: Email to be used for Maintenance Windows task notification
+    Type: String
+
+Resources:
+  #### Bucket to store Patch Management Logs ####
+  LoggingS3Bucket:
+    Type: "AWS::S3::Bucket"
+    Properties:
+      BucketName: !Sub "patch-management-logs-${AWS::AccountId}"
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: "AES256"
+      AccessControl: Private
+
+  #### Custom Baselines for Linux Operating Systems ####
+  AmazonLinux2CustomPatchBaseline:
+    Type: "AWS::SSM::PatchBaseline"
+    Properties:
+      Name: Custom-AmazonLinux2PatchBaseline
+      Description: Custom Patch Baseline for Amazon Linux 2
+      OperatingSystem: AMAZON_LINUX_2
+      # PatchGroups:
+      #   - 'Group_Name'
+      ApprovalRules:
+        PatchRules:
+          - ApproveAfterDays: 7
+            PatchFilterGroup:
+              PatchFilters:
+                - Key: PRODUCT
+                  Values:
+                    - "*"
+                - Key: CLASSIFICATION
+                  Values:
+                    - Security
+                - Key: SEVERITY
+                  Values:
+                    - Critical
+                    - Important
+      RejectedPatchesAction: ALLOW_AS_DEPENDENCY
+      ApprovedPatchesComplianceLevel: UNSPECIFIED
+      ApprovedPatchesEnableNonSecurity: false
+
+  CentOSCustomPatchBaseline:
+    Type: "AWS::SSM::PatchBaseline"
+    Properties:
+      Name: Custom-CentOSPatchBaseline
+      Description: Custom Patch Baseline for CentOS
+      OperatingSystem: CENTOS
+      # PatchGroups:
+      #   - 'Group_Name'
+      ApprovalRules:
+        PatchRules:
+          - ApproveAfterDays: 7
+            PatchFilterGroup:
+              PatchFilters:
+                - Key: PRODUCT
+                  Values:
+                    - "*"
+                - Key: CLASSIFICATION
+                  Values:
+                    - Security
+                - Key: SEVERITY
+                  Values:
+                    - Critical
+                    - Important
+      RejectedPatchesAction: ALLOW_AS_DEPENDENCY
+      ApprovedPatchesComplianceLevel: UNSPECIFIED
+      ApprovedPatchesEnableNonSecurity: false
+
+  RHELCustomPatchBaseline:
+    Type: "AWS::SSM::PatchBaseline"
+    Properties:
+      Name: Custom-RHELPatchBaseline
+      Description: Custom Patch Baseline for RHEL
+      OperatingSystem: REDHAT_ENTERPRISE_LINUX
+      # PatchGroups:
+      #   - 'Group_Name'
+      ApprovalRules:
+        PatchRules:
+          - ApproveAfterDays: 7
+            PatchFilterGroup:
+              PatchFilters:
+                - Key: PRODUCT
+                  Values:
+                    - "*"
+                - Key: CLASSIFICATION
+                  Values:
+                    - Security
+                - Key: SEVERITY
+                  Values:
+                    - Critical
+                    - Important
+      RejectedPatchesAction: ALLOW_AS_DEPENDENCY
+      ApprovedPatchesComplianceLevel: UNSPECIFIED
+      ApprovedPatchesEnableNonSecurity: false
+
+  SUSECustomPatchBaseline:
+    Type: "AWS::SSM::PatchBaseline"
+    Properties:
+      Name: Custom-SUSEPatchBaseline
+      Description: Custom Patch Baseline for SUSE
+      OperatingSystem: SUSE
+      # PatchGroups:
+      #   - 'Group_Name'
+      ApprovalRules:
+        PatchRules:
+          - ApproveAfterDays: 7
+            PatchFilterGroup:
+              PatchFilters:
+                - Key: PRODUCT
+                  Values:
+                    - "*"
+                - Key: CLASSIFICATION
+                  Values:
+                    - Security
+                - Key: SEVERITY
+                  Values:
+                    - Critical
+                    - Important
+      RejectedPatchesAction: ALLOW_AS_DEPENDENCY
+      ApprovedPatchesComplianceLevel: UNSPECIFIED
+      ApprovedPatchesEnableNonSecurity: false
+
+  #### SNS Topic & Subscription ####
+  SNSTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: Patch_Management_Maintenance_Window_Topic_Production
+      DisplayName: Patch Management Maintenance Window Topic_Production
+      # KmsMasterKeyId: 
+      # Tags: 
+
+  SNSSubscription:
+    Type: AWS::SNS::Subscription
+    Properties:
+      Endpoint: !Ref BridgestoneEmailDL
+      Protocol: email
+      TopicArn: !Ref SNSTopic
+
+  #### Production Maintenance Window A ####
+  ProdMaintenanceWindowA:
+    Type: "AWS::SSM::MaintenanceWindow"
+    Properties:
+      Name: Prod_Maintenance_Window_A
+      Description: SSM Maintenance Window to automate AWS Patch Manager tasks for Patch Window A
+      Duration: 3
+      Cutoff: 1
+      Schedule: cron(0 15 ? * SUN#3 *)
+      AllowUnassociatedTargets: false
+      ScheduleTimezone: US/Central
+      Tags:
+        - Key: Environment
+          Value: Production
+        - Key: PatchWindow
+          Value: A
+
+  ProdMaintenanceWindowTargetA:
+    Type: "AWS::SSM::MaintenanceWindowTarget"
+    Properties:
+      Name: Target_For_Prod_Maintenance_Window_A
+      Description: >-
+        Defines the EC2 Instance Targets for Maintenance Window:
+        Prod_Maintenance_Window_A
+      ResourceType: INSTANCE
+      WindowId:
+        Ref: ProdMaintenanceWindowA
+      Targets:
+        - Key: "tag:AutomaticPatches"
+          Values:
+            - "True"
+        - Key: "tag:PatchWindow"
+          Values:
+            - "A"
+
+  ProdMaintenanceWindowTaskA:
+    Type: "AWS::SSM::MaintenanceWindowTask"
+    Properties:
+      Name: AWS-RunPatchBaseline_Task_For_Prod_Maintenance_Window_A
+      Description: >-
+        The Task to run AWS-RunPatchBaseline document for Maintenance Window:
+        Prod_Maintenance_Window_A
+      ServiceRoleArn: !GetAtt MaintWindowIamRole.Arn
+      Priority: 1
+      MaxConcurrency: 100%
+      MaxErrors: 5%
+      Targets:
+        - Key: WindowTargetIds
+          Values:
+            - Ref: ProdMaintenanceWindowTargetA
+      TaskType: RUN_COMMAND
+      WindowId:
+        Ref: ProdMaintenanceWindowA
+      TaskArn: AWS-RunPatchBaseline
+      TaskInvocationParameters:
+        MaintenanceWindowRunCommandParameters:
+          Parameters:
+            Operation:
+              - Install
+          ServiceRoleArn: !GetAtt MaintWindowIamRole.Arn
+          NotificationConfig:
+            NotificationArn: !Ref SNSTopic
+            NotificationEvents:
+              - Success
+              - TimedOut
+              - Cancelled
+              - Failed
+            NotificationType: Command
+          OutputS3BucketName: !Ref LoggingS3Bucket
+          OutputS3KeyPrefix: ""
+          TimeoutSeconds: 600
+    DependsOn:
+      - AmazonLinux2CustomPatchBaseline
+      - CentOSCustomPatchBaseline
+      - RHELCustomPatchBaseline
+      - SUSECustomPatchBaseline
+
+  #### Production Maintenance Window B ####
+
+  ProdMaintenanceWindowB:
+    Type: "AWS::SSM::MaintenanceWindow"
+    Properties:
+      Name: Prod_Maintenance_Window_B
+      Description: SSM Maintenance Window to automate AWS Patch Manager tasks for Patch Window B
+      Duration: 3
+      Cutoff: 1
+      Schedule: cron(0 18 ? * SUN#3 *)
+      AllowUnassociatedTargets: false
+      ScheduleTimezone: US/Central
+      Tags:
+        - Key: Environment
+          Value: Production
+        - Key: PatchWindow
+          Value: B
+
+  ProdMaintenanceWindowTargetB:
+    Type: "AWS::SSM::MaintenanceWindowTarget"
+    Properties:
+      Name: Target_For_Prod_Maintenance_Window_B
+      Description: >-
+        Defines the EC2 Instance Targets for Maintenance Window:
+        Prod_Maintenance_Window_B
+      ResourceType: INSTANCE
+      WindowId:
+        Ref: ProdMaintenanceWindowB
+      Targets:
+        - Key: "tag:AutomaticPatches"
+          Values:
+            - "True"
+        - Key: "tag:PatchWindow"
+          Values:
+            - "B"
+
+  ProdMaintenanceWindowTaskB:
+    Type: "AWS::SSM::MaintenanceWindowTask"
+    Properties:
+      Name: AWS-RunPatchBaseline_Task_For_Prod_Maintenance_Window_B
+      Description: >-
+        The Task to run AWS-RunPatchBaseline document for Maintenance Window:
+        Prod_Maintenance_Window_B
+      ServiceRoleArn: !GetAtt MaintWindowIamRole.Arn
+      Priority: 1
+      MaxConcurrency: 100%
+      MaxErrors: 5%
+      Targets:
+        - Key: WindowTargetIds
+          Values:
+            - Ref: ProdMaintenanceWindowTargetB
+      TaskType: RUN_COMMAND
+      WindowId:
+        Ref: ProdMaintenanceWindowB
+      TaskArn: AWS-RunPatchBaseline
+      TaskInvocationParameters:
+        MaintenanceWindowRunCommandParameters:
+          Parameters:
+            Operation:
+              - Install
+          ServiceRoleArn: !GetAtt MaintWindowIamRole.Arn
+          NotificationConfig:
+            NotificationArn: !Ref SNSTopic
+            NotificationEvents:
+              - Success
+              - TimedOut
+              - Cancelled
+              - Failed
+            NotificationType: Command
+          OutputS3BucketName: !Ref LoggingS3Bucket
+          OutputS3KeyPrefix: ""
+          TimeoutSeconds: 600
+    DependsOn:
+      - AmazonLinux2CustomPatchBaseline
+      - CentOSCustomPatchBaseline
+      - RHELCustomPatchBaseline
+      - SUSECustomPatchBaseline
+
+  #### Production Maintenance Window C ####
+
+  ProdMaintenanceWindowC:
+    Type: "AWS::SSM::MaintenanceWindow"
+    Properties:
+      Name: Prod_Maintenance_Window_C
+      Description: SSM Maintenance Window to automate AWS Patch Manager tasks for Patch Window C
+      Duration: 3
+      Cutoff: 1
+      Schedule: cron(0 21 ? * SUN#3 *)
+      AllowUnassociatedTargets: false
+      ScheduleTimezone: US/Central
+      Tags:
+        - Key: Environment
+          Value: Production
+        - Key: PatchWindow
+          Value: C
+
+  ProdMaintenanceWindowTargetC:
+    Type: "AWS::SSM::MaintenanceWindowTarget"
+    Properties:
+      Name: Target_For_Prod_Maintenance_Window_C
+      Description: >-
+        Defines the EC2 Instance Targets for Maintenance Window:
+        Prod_Maintenance_Window_C
+      ResourceType: INSTANCE
+      WindowId:
+        Ref: ProdMaintenanceWindowC
+      Targets:
+        - Key: "tag:AutomaticPatches"
+          Values:
+            - "True"
+        - Key: "tag:PatchWindow"
+          Values:
+            - "C"
+
+  ProdMaintenanceWindowTaskC:
+    Type: "AWS::SSM::MaintenanceWindowTask"
+    Properties:
+      Name: AWS-RunPatchBaseline_Task_For_Prod_Maintenance_Window_C
+      Description: >-
+        The Task to run AWS-RunPatchBaseline document for Maintenance Window:
+        Prod_Maintenance_Window_C
+      ServiceRoleArn: !GetAtt MaintWindowIamRole.Arn
+      Priority: 1
+      MaxConcurrency: 100%
+      MaxErrors: 5%
+      Targets:
+        - Key: WindowTargetIds
+          Values:
+            - Ref: ProdMaintenanceWindowTargetC
+      TaskType: RUN_COMMAND
+      WindowId:
+        Ref: ProdMaintenanceWindowC
+      TaskArn: AWS-RunPatchBaseline
+      TaskInvocationParameters:
+        MaintenanceWindowRunCommandParameters:
+          Parameters:
+            Operation:
+              - Install
+          ServiceRoleArn: !GetAtt MaintWindowIamRole.Arn
+          NotificationConfig:
+            NotificationArn: !Ref SNSTopic
+            NotificationEvents:
+              - Success
+              - TimedOut
+              - Cancelled
+              - Failed
+            NotificationType: Command
+          OutputS3BucketName: !Ref LoggingS3Bucket
+          OutputS3KeyPrefix: ""
+          TimeoutSeconds: 600
+    DependsOn:
+      - AmazonLinux2CustomPatchBaseline
+      - CentOSCustomPatchBaseline
+      - RHELCustomPatchBaseline
+      - SUSECustomPatchBaseline
+
+  #### Maintenance IAM Role ####
+  
+  MaintWindowIamRole:
+    Type: "AWS::IAM::Role"
+    Properties:
+      RoleName: MaintWindowIamRoleXCi
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - ssm.amazonaws.com
+                - ec2.amazonaws.com
+            Action:
+              - "sts:AssumeRole"
+      ManagedPolicyArns:
+        - "arn:aws:iam::aws:policy/service-role/AmazonSSMMaintenanceWindowRole"
+      Policies:
+        - PolicyName: SNSPolicy
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "sns:Publish"
+                Resource: !Ref SNSTopic
+
+  MaintWindowIamPolicy:
+    Type: "AWS::IAM::Policy"
+    Properties:
+      PolicyName: taskRolePermissions
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action: "iam:PassRole"
+            Resource: !GetAtt MaintWindowIamRole.Arn
+          - Effect: Allow
+            Action:
+              - "s3:PutObject"
+              - "s3:PutObjectAcl"
+            Resource: !Join
+              - ""
+              - - "arn:aws:s3:::"
+                - Ref: LoggingS3Bucket
+                - /*
+      Roles:
+        - Ref: MaintWindowIamRole
+
+  PatchManagementServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: PatchManagementRole
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: "Allow"
+            Principal:
+              Service:
+                - "lambda.amazonaws.com"
+            Action:
+              - "sts:AssumeRole"
+          - Effect: Allow
+            Principal:
+              AWS:
+                Fn::Join:
+                  - ""
+                  - - "arn:aws:iam::"
+                    - !Ref SharedServicesAccountId
+                    - ":role/PatchManagementServiceRole"
+            Action:
+              - sts:AssumeRole
+      Path: "/"
+      Policies:
+        - PolicyName: PatchManagementServicePolicy
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "ssm:RegisterDefaultPatchBaseline"
+                  - "iam:RemoveRoleFromInstanceProfile"
+                  - "iam:DeleteInstanceProfile"
+                  - "logs:CreateLogGroup"
+                  - "logs:CreateLogStream"
+                  - "logs:PutLogEvents"
+                  - "sts:AssumeRole"
+                Resource: "*"
+                Condition:
+                  StringEquals:
+                    aws:PrincipalOrgID:
+                      Ref: OrgId
+
+  SSMPatchRole:
+    Type: AWS::IAM::Role
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W11
+            reason: "This role is used by EC2 and required higher priv."
+    Properties:
+      RoleName: SSMPatchRole
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: "Allow"
+            Principal:
+              Service:
+                - "ec2.amazonaws.com"
+            Action:
+              - "sts:AssumeRole"
+      Path: "/"
+      Policies:
+        - PolicyName: EC2PolicyForSMM
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ssm:DescribeAssociation
+                  - ssm:GetDeployablePatchSnapshotForInstance
+                  - ssm:GetDocument
+                  - ssm:DescribeDocument
+                  - ssm:GetManifest
+                  - ssm:GetParameters
+                  - ssm:ListAssociations
+                  - ssm:ListInstanceAssociations
+                  - ssm:PutInventory
+                  - ssm:PutComplianceItems
+                  - ssm:PutConfigurePackageResult
+                  - ssm:UpdateAssociationStatus
+                  - ssm:UpdateInstanceAssociationStatus
+                  - ssm:UpdateInstanceInformation
+                Resource: "*"
+                Condition:
+                  StringEquals:
+                    aws:PrincipalOrgID:
+                      Ref: OrgId
+              - Effect: Allow
+                Action:
+                  - ssmmessages:CreateControlChannel
+                  - ssmmessages:CreateDataChannel
+                  - ssmmessages:OpenControlChannel
+                  - ssmmessages:OpenDataChannel
+                Resource: "*"
+                Condition:
+                  StringEquals:
+                    aws:PrincipalOrgID:
+                      Ref: OrgId
+              - Effect: Allow
+                Action:
+                  - ec2messages:AcknowledgeMessage
+                  - ec2messages:DeleteMessage
+                  - ec2messages:FailMessage
+                  - ec2messages:GetEndpoint
+                  - ec2messages:GetMessages
+                  - ec2messages:SendReply
+                Resource: "*"
+                Condition:
+                  StringEquals:
+                    aws:PrincipalOrgID:
+                      Ref: OrgId
+              - Effect: Allow
+                Action:
+                  - cloudwatch:PutMetricData
+                Resource: "*"
+                Condition:
+                  StringEquals:
+                    aws:PrincipalOrgID:
+                      Ref: OrgId
+              - Effect: Allow
+                Action:
+                  - ec2:DescribeInstanceStatus
+                Resource: "*"
+                Condition:
+                  StringEquals:
+                    aws:PrincipalOrgID:
+                      Ref: OrgId
+              - Effect: Allow
+                Action:
+                  - ds:CreateComputer
+                  - ds:DescribeDirectories
+                Resource: "*"
+                Condition:
+                  StringEquals:
+                    aws:PrincipalOrgID:
+                      Ref: OrgId
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:DescribeLogGroups
+                  - logs:DescribeLogStreams
+                  - logs:PutLogEvents
+                Resource: "*"
+                Condition:
+                  StringEquals:
+                    aws:PrincipalOrgID:
+                      Ref: OrgId
+              - Effect: Allow
+                Action:
+                  - s3:GetBucketLocation
+                  - s3:PutObject
+                  - s3:GetObject
+                  - s3:GetEncryptionConfiguration
+                  - s3:AbortMultipartUpload
+                  - s3:ListMultipartUploadParts
+                  - s3:ListBucket
+                  - s3:ListBucketMultipartUploads
+                Resource: "*"
+                Condition:
+                  StringEquals:
+                    aws:PrincipalOrgID:
+                      Ref: OrgId
+        - PolicyName: SSMEC2Policy
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ssm:DescribeAssociation
+                  - ssm:GetDeployablePatchSnapshotForInstance
+                  - ssm:GetDocument
+                  - ssm:DescribeDocument
+                  - ssm:GetManifest
+                  - ssm:GetParameter
+                  - ssm:GetParameters
+                  - ssm:ListAssociations
+                  - ssm:ListInstanceAssociations
+                  - ssm:PutInventory
+                  - ssm:PutComplianceItems
+                  - ssm:PutConfigurePackageResult
+                  - ssm:UpdateAssociationStatus
+                  - ssm:UpdateInstanceAssociationStatus
+                  - ssm:UpdateInstanceInformation
+                Resource: "*"
+                Condition:
+                  StringEquals:
+                    aws:PrincipalOrgID:
+                      Ref: OrgId
+              - Effect: Allow
+                Action:
+                  - ssmmessages:CreateControlChannel
+                  - ssmmessages:CreateDataChannel
+                  - ssmmessages:OpenControlChannel
+                  - ssmmessages:OpenDataChannel
+                Resource: "*"
+                Condition:
+                  StringEquals:
+                    aws:PrincipalOrgID:
+                      Ref: OrgId
+              - Effect: Allow
+                Action:
+                  - ec2messages:AcknowledgeMessage
+                  - ec2messages:DeleteMessage
+                  - ec2messages:FailMessage
+                  - ec2messages:GetEndpoint
+                  - ec2messages:GetMessages
+                  - ec2messages:SendReply
+                Resource: "*"
+
+  SSMInstanceProfile:
+    Type: "AWS::IAM::InstanceProfile"
+    Properties:
+      InstanceProfileName: SSMInstanceProfile
+      Path: "/"
+      Roles:
+        - Ref: SSMPatchRole
+
+  #### CF Custom Resource - Triggers SNS topic -> Lambda to register custom baselines as default on Creation  ####
+  PatchManagementCustomResource:
+    Type: Custom::CustomResource
+    Properties:
+      ServiceToken: !Sub arn:aws:sns:${AWS::Region}:${SharedServicesAccountId}:pm-custom-lambda-proxy
+      AmazonLinux2CustomPatchBaselineId: !Ref AmazonLinux2CustomPatchBaseline
+      CentOSCustomPatchBaselineId: !Ref CentOSCustomPatchBaseline
+      RHELCustomPatchBaseline: !Ref RHELCustomPatchBaseline
+      SUSECustomPatchBaseline: !Ref SUSECustomPatchBaseline
+      AccountId: !Ref AWS::AccountId
+      RoleName: !Ref PatchManagementServiceRole
+      Region: !Ref AWS::Region
+      InstanceProfileName: !Ref SSMInstanceProfile
+      SSMRoleName: !Ref SSMPatchRole

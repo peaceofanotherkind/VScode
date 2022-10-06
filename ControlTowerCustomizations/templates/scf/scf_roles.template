@@ -1,0 +1,27 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: Deploys baselines roles required by Secure Cloud Foundation (SCF)
+
+Parameters:
+  SharedServicesAccountId:
+    Type: String
+    Description: Shared services account ID for DevSecOps roles
+
+Resources:
+  # Roles for DevSecOps Solution
+
+  AzureDevOpsMemberRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Path: /
+      RoleName: AzureDevOpsMemberRole
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS:
+                - !Sub arn:aws:iam::${SharedServicesAccountId}:role/AzureDevOpsMasterRole
+            Action:
+              - "sts:AssumeRole"
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AdministratorAccess

@@ -1,0 +1,26 @@
+[
+    {
+        "ParameterKey": "OrgId",
+        "ParameterValue": "o-w7upbvgl57"
+    },
+    {
+        "ParameterKey": "LayersBucket",
+        "ParameterValue": "bsam-patch-mgmt-crhelper-layer-prod"
+    },
+    {
+        "ParameterKey": "DefaultAmazonLinux2PatchBaselineId",
+        "ParameterValue": "arn:aws:ssm:us-east-1:075727635805:patchbaseline/pb-0be8c61cde3be63f3"
+    },
+    {
+        "ParameterKey": "DefaultCentOSPatchBaselineId",
+        "ParameterValue": "arn:aws:ssm:us-east-1:075727635805:patchbaseline/pb-03e3f588eec25344c"
+    },
+    {
+        "ParameterKey": "DefaultRHELPatchBaselineId",
+        "ParameterValue": "arn:aws:ssm:us-east-1:075727635805:patchbaseline/pb-0cbb3a633de00f07c"
+    },
+    {
+        "ParameterKey": "DefaultSUSEPatchBaselineId",
+        "ParameterValue": "arn:aws:ssm:us-east-1:075727635805:patchbaseline/pb-07d8884178197b66b"
+    }
+]

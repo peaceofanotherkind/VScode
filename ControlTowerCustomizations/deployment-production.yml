@@ -1,0 +1,4 @@
+region: us-east-1
+masterAccountId: 342458631622
+bucketName: custom-control-tower-configuration-342458631622-us-east-1
+kmsKeyId: 555f56e9-f5dd-40b4-b43f-b967cdb5cf94

@@ -1,0 +1,6 @@
+[
+    {
+        "ParameterKey": "S3BucketName",
+        "ParameterValue": "bsam-ansible-installs-035935210323-s3"
+    }
+]

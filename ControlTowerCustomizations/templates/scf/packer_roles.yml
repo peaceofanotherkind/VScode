@@ -1,0 +1,43 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: 'IAM Role for Packer Ec2 instance'
+Parameters:
+  S3BucketName: 
+    Type: String 
+    Default: "bsam-ansible-installs-049265147042-s3"
+    Description: "S3 bucket name where ansible install files are located.  This is a copy of ICEREPO onprem"
+  
+Resources:
+  PackerEC2IAMRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - ec2.amazonaws.com
+            Action:
+              - 'sts:AssumeRole'
+      Path: /
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+      Policies:
+        - PolicyName: PackerS3Access
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: 
+                  - 's3:GetObject'
+                Resource: !Sub 'arn:aws:s3:::${S3BucketName}/*'
+              - Effect: Allow 
+                Action:
+                  - 's3:ListBucket'
+                Resource: !Sub 'arn:aws:s3:::${S3BucketName}'
+  PackerInstanceProfile:
+    Type: 'AWS::IAM::InstanceProfile'
+    Properties:
+      Path: /
+      Roles:
+        - !Ref PackerEC2IAMRole
