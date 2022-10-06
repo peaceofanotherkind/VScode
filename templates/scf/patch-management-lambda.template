@@ -1,0 +1,259 @@
+---
+AWSTemplateFormatVersion: 2010-09-09
+Description: AWS SSM Patch Management Custom Lambda to register patch baselines as default for Environment
+
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: ''
+        Parameters:
+          - OrgId
+          - LayersBucket
+      - Label:
+          default: 'Default Patch Baselines'
+        Parameters:
+          - DefaultAmazonLinux2PatchBaselineId
+          - DefaultCentOSPatchBaselineId
+          - DefaultRHELPatchBaselineId
+          - DefaultSUSEPatchBaselineId
+
+    ParameterLabels:
+      OrgId:
+        default: Organization ID
+      LayersBucket:
+        default: S3 Layer Bucket Name
+      DefaultAmazonLinux2PatchBaselineId:
+        default: Default Amazon Linux2 Patch Baseline ID
+      DefaultCentOSPatchBaselineId:
+        default: Default CentOS Patch Baseline ID
+      DefaultRHELPatchBaselineId:
+        default: Default RHEL Patch Baseline ID
+      DefaultSUSEPatchBaselineId:
+        default: Default SUSE Patch Baseline ID
+
+Parameters:
+  OrgId:
+    Description: AWS Root Organization ID
+    Type: String
+  LayersBucket:
+    Description: The Name of S3 Bucket with Custom Resource Helper Layers Archive Files
+    Type: String
+  DefaultAmazonLinux2PatchBaselineId:
+    Description: ID (ARN) of Default Patch Baseline for Amazon Linux 2 Provided by AWS.
+    Type: String
+    Default: arn:aws:ssm:us-east-1:075727635805:patchbaseline/pb-0be8c61cde3be63f3
+  DefaultCentOSPatchBaselineId:
+    Description: ID (ARN) of Default Patch Baseline for CentOS Provided by AWS.
+    Type: String
+    Default: arn:aws:ssm:us-east-1:075727635805:patchbaseline/pb-03e3f588eec25344c
+  DefaultRHELPatchBaselineId:
+    Description: ID (ARN) of Default Patch Baseline for RHEL Provided by AWS.
+    Type: String
+    Default: arn:aws:ssm:us-east-1:075727635805:patchbaseline/pb-0cbb3a633de00f07c
+  DefaultSUSEPatchBaselineId:
+    Description: ID (ARN) of Default Patch Baseline for Suse Provided by AWS.
+    Type: String
+    Default: arn:aws:ssm:us-east-1:075727635805:patchbaseline/pb-07d8884178197b66b
+
+Resources:
+  CRHelperLayer:
+    Type: AWS::Lambda::LayerVersion
+    Properties:
+      CompatibleRuntimes:
+        - python3.6
+        - python3.7
+        - python3.8
+      Content:
+        S3Bucket:
+          Ref: LayersBucket
+        S3Key: aws-crhelper-layer.zip
+      Description: Contains crhelper library
+      LayerName: crhelper-layer
+
+  CustomFunction:
+      Type: AWS::Lambda::Function
+      Properties:
+        Description: 'Registers patchbaseline as default'
+        Handler: index.lambda_handler
+        Layers:
+          - !Ref CRHelperLayer
+        MemorySize: 128
+        Role: !GetAtt PatchManagementServiceRole.Arn
+        Runtime: python3.7
+        Timeout: 60
+        Environment:
+          Variables:
+            DEFAULT_AMAZONLINUX2_PATCH_BASELINE_ID: !Ref DefaultAmazonLinux2PatchBaselineId
+            DEFAULT_CENTOS_PATCH_BASELINE_ID: !Ref DefaultCentOSPatchBaselineId
+            DEFAULT_RHEL_PATCH_BASELINE_ID: !Ref DefaultRHELPatchBaselineId
+            DEFAULT_SUSE_PATCH_BASELINE_ID: !Ref DefaultSUSEPatchBaselineId
+        Code:
+          ZipFile: |
+            import json
+            import boto3
+            import string
+            import traceback
+            import os
+            import random
+
+            from crhelper import CfnResource
+            helper = CfnResource(json_logging=True, log_level='DEBUG', boto_level='CRITICAL')
+
+            def generate_role_session_name(stringLength):
+                letters = string.ascii_letters
+                return ''.join(random.choice(letters) for index in range(stringLength))
+
+            def assume_role(role_name,account_id):
+                print('assume_role: role_name: {}  account_id: {}'.format(role_name, account_id))
+                try:
+                    sts = boto3.client('sts')
+                    session_name = generate_role_session_name(10)
+                    partition = sts.get_caller_identity()['Arn'].split(':')[1]
+                    role = sts.assume_role(RoleArn='arn:{}:iam::{}:role/{}'.format(partition,account_id,role_name),RoleSessionName=session_name)
+                    return role
+                except Exception as e:
+                    error_message = 'Assumed role failed: {}'.format(traceback.format_exc())
+                    print('ASSUME_ROLE: {}'.format(error_message))
+                    raise Exception(error_message)
+
+            def register_default_patch_baseline(role_name, region, account_id, patch_baseline_ids):
+                credentials = assume_role(role_name,account_id)['Credentials']
+                client = boto3.client('ssm',region_name=region,aws_access_key_id=credentials['AccessKeyId'],aws_secret_access_key=credentials['SecretAccessKey'],aws_session_token=credentials['SessionToken'])
+
+                try:
+                    for baseline_id in patch_baseline_ids:
+                        response = client.register_default_patch_baseline(BaselineId=baseline_id)
+                        print('response: {}'.format(response))
+                        helper.Data['baseline_id'] = str(baseline_id)
+                except Exception as e:
+                    error_message = 'register_default_patch_baseline: {}'.format(traceback.format_exc())
+                    raise Exception(error_message)
+
+            @helper.update
+            def no_op(_, __):
+                pass
+
+            @helper.delete
+            def delete(event, context):
+                patch_baseline_ids = []
+                patch_baseline_ids.append(os.environ['DEFAULT_AMAZONLINUX2_PATCH_BASELINE_ID'])
+                patch_baseline_ids.append(os.environ['DEFAULT_CENTOS_PATCH_BASELINE_ID'])
+                patch_baseline_ids.append(os.environ['DEFAULT_RHEL_PATCH_BASELINE_ID'])
+                patch_baseline_ids.append(os.environ['DEFAULT_SUSE_PATCH_BASELINE_ID'])
+
+                role_name = event['ResourceProperties']['RoleName']
+                account_id = event['ResourceProperties']['AccountId']
+                region = event['ResourceProperties']['Region']
+                instance_profile_name = event['ResourceProperties']['InstanceProfileName']
+                ssm_role_name = event['ResourceProperties']['SSMRoleName']
+
+                register_default_patch_baseline(role_name, region, account_id, patch_baseline_ids)
+           
+            @helper.create
+            def create(event, context):
+                patch_baseline_ids = []
+                patch_baseline_ids.append(event['ResourceProperties']['AmazonLinux2CustomPatchBaselineId'])
+                patch_baseline_ids.append(event['ResourceProperties']['CentOSCustomPatchBaselineId'])
+                patch_baseline_ids.append(event['ResourceProperties']['RHELCustomPatchBaseline'])
+                patch_baseline_ids.append(event['ResourceProperties']['SUSECustomPatchBaseline'])
+              
+                role_name = event['ResourceProperties']['RoleName']
+                account_id = event['ResourceProperties']['AccountId']
+                region = event['ResourceProperties']['Region']
+
+                register_default_patch_baseline(role_name, region, account_id, patch_baseline_ids)
+
+            def lambda_handler(event, context):
+                try:
+                    event = json.loads(event['Records'][0]['Sns']['Message'])
+                    helper(event, context)
+                except Exception as e:
+                    error_message = 'LAMBDA HANDLER EXCEPTION: {}'.format(traceback.format_exc())
+                    print(error_message)
+                    raise Exception(error_message)
+  
+  LambdaSNSTopic:
+    Type: AWS::SNS::Topic
+    Properties: 
+      Subscription:
+        - Endpoint: !GetAtt CustomFunction.Arn
+          Protocol: lambda
+      TopicName: pm-custom-lambda-proxy
+  
+  LambdaSNSTopicPolicy:
+    Type: AWS::SNS::TopicPolicy
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: F18
+            reason: "Need to allow * principal with condition"
+    Properties:
+      Topics:
+        - Ref: LambdaSNSTopic
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          Effect: Allow
+          Principal:
+            AWS: '*'
+          Action: 'SNS:Publish'
+          Resource:
+            Ref: LambdaSNSTopic
+          Condition:
+            StringEquals:
+              aws:PrincipalOrgID:
+                Ref: OrgId
+
+  LambdaSNSPermission:
+      Type: AWS::Lambda::Permission
+      Properties:
+        Action: 'lambda:InvokeFunction'
+        FunctionName: !GetAtt CustomFunction.Arn
+        Principal: sns.amazonaws.com
+        SourceArn:
+          Ref: LambdaSNSTopic
+          
+  PatchManagementServiceRole:
+    Type: AWS::IAM::Role
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W11
+            reason: "This role is used by Lambda and required higher priv."
+    Properties:
+      RoleName: PatchManagementServiceRole
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: 'Allow'
+            Principal:
+              Service:
+                - "lambda.amazonaws.com"
+            Action:
+              - "sts:AssumeRole"
+          - Effect: Allow
+            Principal:
+              AWS: '*'
+            Action:
+              - sts:AssumeRole
+      Path: "/"
+      Policies:
+        - PolicyName: PatchManagementServicePolicy
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 'ssm:RegisterDefaultPatchBaseline'
+                  - 'iam:RemoveRoleFromInstanceProfile'
+                  - 'iam:DeleteInstanceProfile'
+                  - 'logs:CreateLogGroup'
+                  - 'logs:CreateLogStream'
+                  - 'logs:PutLogEvents'
+                  - 'sts:AssumeRole'
+                Resource: '*'
+                Condition:
+                  StringEquals:
+                    aws:PrincipalOrgID:
+                      Ref: OrgId

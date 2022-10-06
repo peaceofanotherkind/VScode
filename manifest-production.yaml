@@ -1,0 +1,187 @@
+####################################################################################################
+###################################### PRODUCTION ENVIRONMENT ######################################
+####################################################################################################
+
+---
+# Default region for deploying Custom Control Tower: Code Pipeline, Step functions, Lambda, SSM parameters, and StackSets
+region: us-east-1
+version: 2020-01-01
+
+# Control Tower Custom Service Control Policies
+organization_policies:
+  - name: scp-enforcement-controls
+    description: Adding SCPs
+    policy_file: policies/scp-enforcement-controls.json
+    # Apply to the following OU(s)
+    apply_to_accounts_in_ou: # :type: list
+      #- Infrastructure
+      - Custom
+      - Non-Production
+      - POC
+      - Development
+  - name: preventive-guardrails
+    description: SCPs to be applied to Orgs
+    policy_file: policies/preventive-guardrails.json
+    # Apply to the following OU(s)
+    apply_to_accounts_in_ou: # :type: list
+      #- Infrastructure
+      - Custom
+      - Non-Production
+      - POC
+      - Development
+
+# Control Tower Custom CloudFormation Resources
+cloudformation_resources:
+  ## ----------- old bsam customizations ---------#
+  - name: route53PublicZone-service-catalog-portfolio
+    deploy_method: stack_set
+    template_file: templates/service-catalog-route53PublicZone.template
+    parameter_file: parameters/prod/service-catalog-route53PublicZone.json
+    deploy_to_ou:
+      # >>> Add newly created OUs needing VPCs here
+      # Do not include the OU containing the Network account here
+      # instead include all the accounts in that OU except for Network below in "deploy_to_account"
+      - Development
+      - Production
+      - Non-Production
+      # - Infrastructure
+    deploy_to_account:
+      # Any accounts in the OU having the Network account, minus the Network account itself
+      # If there are no accounts other than Network, remove this deploy_to_account section entirely.
+      - Shared Services
+      - Security
+
+  # Logging - VPC Flowlog Bucket
+  - name: logging-vpcflowlogs-bucket
+    deploy_method: stack_set
+    template_file: templates/logging-flowlogs-bucket.yml
+    #parameter_file: parameters/prod/logging-vpcflowlogs.json #Not used currently
+    deploy_to_ou:
+      # >>> Add newly created OUs needing VPCs here
+      # Do not include the OU containing the Network account here
+      # instead include all the accounts in that OU except for Network below in "deploy_to_account"
+      # - dev
+    deploy_to_account:
+      - Log archive
+      # Any accounts in the OU having the Network account, minus the Network account itself
+      # If there are no accounts other than Network, remove this deploy_to_account section entirely.
+      # - Shared Services
+
+
+  ## -----------   SCF RESOURCES ------------  ##
+  - name: scf-ado
+    template_file: templates/scf/azuredevops.template
+    parameter_file: parameters/prod/azuredevops.json
+    deploy_method: stack_set
+    deploy_to_account: # ONLY DIRECT TO ACCOUNT DEPLOYMENT
+      - Shared Services
+      # - Shared Services
+    regions:
+      - us-east-1
+  - name: scf-roles
+    template_file: templates/scf/scf_roles.template
+    parameter_file: parameters/prod/scf_roles.json
+    deploy_method: stack_set
+    deploy_to_ou: # :type: list
+      - Infrastructure
+      - Core
+  - name: cn-roles
+    template_file: templates/scf/cn-network-share-tag-member-role.template
+    parameter_file: parameters/prod/cn-network-share-tag-member-role.json
+    deploy_method: stack_set
+    regions:
+      - us-east-1
+      - us-west-2
+    deploy_to_ou: # :type: list
+      - Infrastructure
+      - Core
+      - Production
+      - Development
+      - Non-Production
+      - POC
+  - name: scf-patch-mgmt-lambda
+    template_file: templates/scf/patch-management-lambda.template
+    parameter_file: parameters/prod/patch-management-lambda.json
+    deploy_method: stack_set
+    deploy_to_account: # ONLY DIRECT TO ACCOUNT DEPLOYMENT
+      - Shared Services
+    regions:
+      - us-east-1
+  - name: scf-patch-manager-setup-non-prod
+    template_file: templates/scf/patch-manager-setup-non-prod.template
+    parameter_file: parameters/prod/patch-manager-setup.json
+    deploy_method: stack_set
+    deploy_to_ou: # :type: list
+      - Development
+      - Non-Production
+      - POC
+    regions:
+      - us-east-1
+  - name: scf-patch-manager-setup-production
+    template_file: templates/scf/patch-manager-setup-production.template
+    parameter_file: parameters/prod/patch-manager-setup.json
+    deploy_method: stack_set
+    deploy_to_ou: # :type: list
+      - Infrastructure
+      - Core
+      - Production
+    regions:
+      - us-east-1
+  - name: scf-ebs-encryption
+    template_file: templates/scf/ebs-encryption.template
+    parameter_file: parameters/prod/ebs-encryption.json
+    deploy_method: stack_set
+    deploy_to_ou: # :type: list
+      - Infrastructure
+      - Core
+      - Production
+      - Development
+      - Non-Production
+      - POC
+    regions:
+      - us-east-1
+  - name: access-analyzer-org #deploys organization analyzer - needs delegated admin
+    template_file: templates/scf/iam_access_analyser_org.template
+    parameter_file: parameters/prod/access-analyser.json
+    deploy_method: stack_set
+    deploy_to_account: # ONLY DIRECT TO ACCOUNT DEPLOYMENT
+      - Audit
+    regions:
+      - us-east-1
+  - name: access-analyzer-account #deploys account analyzer
+    template_file: templates/scf/iam_access_analyser_ac.template
+    parameter_file: parameters/prod/access-analyser.json
+    deploy_method: stack_set
+    deploy_to_ou: # :type: list
+      - Infrastructure
+      - Core
+      - Production
+      - Development
+      - Non-Production
+      - POC
+    regions:
+      - us-east-1
+  - name: scf-backup
+    template_file: templates/scf/bp.template
+    parameter_file: parameters/prod/bp.json
+    deploy_method: stack_set
+    deploy_to_ou: # :type: list
+      - Infrastructure
+      - Core
+      - Production
+      - Development
+      - Non-Production
+      - POC
+    regions:
+      - us-east-1
+
+  ##### BRIDGESTONE ADDITIONS ##########
+  - name: packer-roles
+    template_file: templates/scf/packer_roles.yml
+    parameter_file: parameters/prod/packer_roles.json
+    deploy_method: stack_set
+    deploy_to_account: # ONLY DIRECT TO ACCOUNT DEPLOYMENT
+      - Shared Services
+    regions:
+      - us-east-1
+

@@ -1,0 +1,14 @@
+[
+    {
+        "ParameterKey": "TagShareRoleName",
+        "ParameterValue": "central-network-share-tag-automator"
+    },
+    {
+        "ParameterKey": "DNSAssociationRoleName",
+        "ParameterValue": "central-network-dns-associator"
+    },
+    {
+        "ParameterKey": "NetworkAccountID",
+        "ParameterValue": "104400678473"
+    }
+]

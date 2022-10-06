@@ -1,0 +1,232 @@
+trigger:
+  branches:
+    include:
+      - Support_DevInt # Dev
+      - Support # Prod
+
+variables:
+  - group: globals
+  - name: SLS_ARTIFACT_NAME
+    value: "npm-packages"
+  - name: region
+    value: us-east-1
+   
+  # DEV Variables
+  - ${{ if eq(variables['Build.SourceBranch'], 'refs/heads/Support_DevInt') }}:
+      - name: pool_name
+        value: $(DEV_POOL_NAME)
+      - name: env
+        value: dev
+      - name: environment
+        value: development
+      - name: container_tag
+        value: $(DEV_TAG_NAME_SERVERLESS)
+      - name: ss_account_id
+        value: $(DEV_SS_ACCOUNT_ID)
+
+  # PROD Variables
+  - ${{ if eq(variables['Build.SourceBranch'], 'refs/heads/Support') }}:
+      - name: pool_name
+        value: $(PROD_POOL_NAME)
+      - name: env
+        value: prod
+      - name: environment
+        value: production
+      - name: container_tag
+        value: $(PROD_TAG_NAME_SERVERLESS)
+      - name: ss_account_id
+        value: $(PROD_SS_ACCOUNT_ID)
+
+pool: $(pool_name)
+
+stages:
+  - stage: installation
+    jobs:
+      - job: installLibraries
+        container:
+          image: $(ss_account_id).dkr.ecr.$(region).amazonaws.com/serverless-pipelines:$(container_tag)
+        displayName: Install NPM Libraries for ${{ variables.environment }}
+        steps:
+          - script: |
+              export AWS_DEFAULT_REGION=`cat deployment.yml | yq -r .region`
+              echo $AWS_DEFAULT_REGION
+
+              npm install
+          - publish: $(System.DefaultWorkingDirectory)/node_modules
+            artifact: $(SLS_ARTIFACT_NAME)
+
+  - stage: packaging
+    jobs:
+      - job: generatePackage
+        container:
+          image: $(ss_account_id).dkr.ecr.$(region).amazonaws.com/serverless-pipelines:$(container_tag)
+        displayName: Packaging for ${{ variables.environment }}
+        steps:
+          - task: DownloadPipelineArtifact@2
+            inputs:
+              source: current
+              artifact: $(SLS_ARTIFACT_NAME)
+              path: $(System.DefaultWorkingDirectory)/node_modules #'$(Pipeline.Workspace)'
+          - script: |
+              ls -la
+              export ACCOUNT_ID=`cat deployment.yml | yq -r .$(env).accountId`
+              echo $ACCOUNT_ID
+
+              export AWS_DEFAULT_REGION=`cat deployment.yml | yq -r .region`
+              echo $AWS_DEFAULT_REGION
+
+              export ROLE="arn:aws:iam::$ACCOUNT_ID:role/AzureDevOpsMemberRole"
+
+              echo "===== assuming permissions => $ROLE ====="
+              account_role=`aws sts assume-role --role-arn $ROLE --role-session-name "AzureDevOps-cowabunga-$(Build.SourceVersion)"`
+
+              export AWS_ACCESS_KEY_ID=$(echo $account_role | jq -r .Credentials.AccessKeyId)
+              echo $AWS_ACCESS_KEY_ID
+              export AWS_SECRET_ACCESS_KEY=$(echo $account_role | jq -r .Credentials.SecretAccessKey)
+              echo $AWS_SECRET_ACCESS_KEY
+              export AWS_SESSION_TOKEN=$(echo $account_role | jq -r .Credentials.SessionToken)
+              echo $AWS_SESSION_TOKEN
+              export AWS_SECURITY_TOKEN=$(echo $account_role | jq -r .Credentials.SessionToken)
+              echo $AWS_SECURITY_TOKEN
+
+              serverless package -c serverless.$AWS_DEFAULT_REGION.yml --stage $(env) --region $AWS_DEFAULT_REGION
+          - publish: $(System.DefaultWorkingDirectory)/node_modules
+            artifact: $(Build.Repository.Name)-$(Build.SourceBranchName)-$(Build.BuildNumber)-$(Build.SourceVersion)
+          - task: CopyFiles@2
+            inputs:
+              contents: ".serverless/*"
+              targetFolder: $(Build.ArtifactStagingDirectory)
+          - task: PublishBuildArtifacts@1
+            inputs:
+              pathToPublish: $(Build.ArtifactStagingDirectory)
+              artifactName: $(Build.BuildNumber)-cft
+              publishLocation: Container
+          - publish: $(System.DefaultWorkingDirectory)/node_modules
+            artifact: $(Build.Repository.Name)-$(Build.SourceBranchName)-$(Build.BuildNumber)-$(Build.SourceVersion)
+          - task: CopyFiles@2
+            inputs:
+              contents: ".serverless/*"
+              targetFolder: $(Build.ArtifactStagingDirectory)
+          - task: PublishBuildArtifacts@1
+            inputs:
+              pathToPublish: $(Build.ArtifactStagingDirectory)
+              artifactName: $(Build.BuildNumber)-cft
+              publishLocation: Container
+
+  - stage: scan
+    jobs:
+      - job: cfnLint
+        container:
+          image: $(ss_account_id).dkr.ecr.$(region).amazonaws.com/serverless-pipelines:$(container_tag)
+        displayName: Cloudformation Linting for ${{ variables.environment }}
+        steps:
+          - task: DownloadBuildArtifacts@0
+            inputs:
+              buildType: current
+              artifactName: $(Build.BuildNumber)-cft
+              downloadPath: $(System.DefaultWorkingDirectory)
+
+          - script: |
+              set +e
+              echo "--- Linting CloudFormation templates ---"
+              cfn-lint $(Build.BuildNumber)-cft/.serverless/cloudformation-*.json 2> /dev/null; exit_status=$?
+              ERROR_MASK=2
+              WARNING_MASK=4
+              INFO_ERROR_MASK=8
+
+              if [ $(( exit_status & ERROR_MASK )) -gt 0 ]
+              then
+                  echo "Errors!" >&2
+                  # Fail on errors
+                  exit 1
+              elif [ $(( exit_status & WARNING_MASK )) -gt 0 ]
+              then
+                  echo "Warnings!" >&2
+                  # Don't fail on warnings
+                  exit 0
+              elif [ $(( exit_status & INFO_ERROR_MASK )) -gt 0 ]
+              then
+                  echo "Info" >&2
+                  # Don't fail on info
+                  exit 0
+              else
+                  exit 0
+              fi
+      - job: cfnNag
+        container:
+          image: $(ss_account_id).dkr.ecr.$(region).amazonaws.com/serverless-pipelines:$(container_tag)
+        displayName: Cloudformation Security Check for ${{ variables.environment }}
+        steps:
+          - task: DownloadBuildArtifacts@0
+            inputs:
+              buildType: current
+              artifactName: $(Build.BuildNumber)-cft
+              downloadPath: $(System.DefaultWorkingDirectory)
+          - script: |
+              cfn_nag_scan --input-path $(Build.BuildNumber)-cft/.serverless/cloudformation-*
+      - job: flake8
+        container:
+          image: $(ss_account_id).dkr.ecr.$(region).amazonaws.com/serverless-pipelines:$(container_tag)
+        displayName: Python Code Linting for ${{ variables.environment }}
+        steps:
+          - task: DownloadBuildArtifacts@0
+            inputs:
+              buildType: current
+              artifactName: $(Build.BuildNumber)-cft
+              downloadPath: $(System.DefaultWorkingDirectory)
+          - script: |
+              echo "--- Lint Check for Python source code  ---"
+              flake8 -v src/functions --exclude src/functions/lib
+      - job: black
+        container:
+          image: $(ss_account_id).dkr.ecr.$(region).amazonaws.com/serverless-pipelines:$(container_tag)
+        displayName: Python Code Formatting for ${{ variables.environment }}
+        steps:
+          - task: DownloadBuildArtifacts@0
+            inputs:
+              buildType: current
+              artifactName: $(Build.BuildNumber)-cft
+              downloadPath: $(System.DefaultWorkingDirectory)
+          - script: |
+              echo "--- Formatting Check for Python source code  ---"
+              black -v src/functions
+
+  - stage: deploy
+    jobs:
+      - deployment: Deployment
+        container:
+          image: $(ss_account_id).dkr.ecr.$(region).amazonaws.com/serverless-pipelines:$(container_tag)
+        displayName: Deploy to ${{ variables.environment }}
+        continueOnError: false
+        environment: $(environment)
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - task: DownloadPipelineArtifact@2
+                  inputs:
+                    source: current
+                    artifact: $(Build.Repository.Name)-$(Build.SourceBranchName)-$(Build.BuildNumber)-$(Build.SourceVersion)
+                    path: $(System.DefaultWorkingDirectory)/node_modules
+                - script: |
+                    export ACCOUNT_ID=`cat deployment.yml | yq -r .$(env).accountId`
+                    echo $ACCOUNT_ID
+
+                    export AWS_DEFAULT_REGION=`cat deployment.yml | yq -r .region`
+                    echo $AWS_DEFAULT_REGION
+
+                    export ROLE="arn:aws:iam::$ACCOUNT_ID:role/AzureDevOpsMemberRole"
+
+                    echo "===== assuming permissions => $ROLE ====="
+                    account_role=`aws sts assume-role --role-arn $ROLE --role-session-name "AzureDevOps-cowabunga-$(Build.SourceVersion)"`
+                        
+                    export AWS_ACCESS_KEY_ID=$(echo $account_role | jq -r .Credentials.AccessKeyId)
+                    echo $AWS_ACCESS_KEY_ID
+                    export AWS_SECRET_ACCESS_KEY=$(echo $account_role | jq -r .Credentials.SecretAccessKey)
+                    echo $AWS_SECRET_ACCESS_KEY
+                    export AWS_SESSION_TOKEN=$(echo $account_role | jq -r .Credentials.SessionToken)
+                    echo $AWS_SESSION_TOKEN
+                    export AWS_SECURITY_TOKEN=$(echo $account_role | jq -r .Credentials.SessionToken)
+                    echo $AWS_SECURITY_TOKEN
+
+                    serverless deploy -c serverless.$AWS_DEFAULT_REGION.yml --stage $(env) --region $AWS_DEFAULT_REGION --verbose

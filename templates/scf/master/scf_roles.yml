@@ -1,0 +1,142 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: Deploys baselines roles required by Secure Cloud Foundation (SCF)
+
+Parameters:
+  SharedServicesAccountId:
+    Type: String
+    Description: Shared services account ID for DevSecOps roles
+
+Resources:
+  # Roles for DevSecOps Solution
+
+  AzureDevOpsMemberRole:
+    Type: AWS::IAM::Role
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: F3
+            reason: "This role is used by DevOps and required higher priv."
+    Properties:
+      Path: /
+      RoleName: AzureDevOpsMemberRole
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS:
+                - !Sub arn:aws:iam::${SharedServicesAccountId}:role/AzureDevOpsMasterRole
+            Action:
+              - "sts:AssumeRole"
+      Policies:
+        - PolicyName: "Allow-Org-Read"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - organizations:ListRoots
+                  - organizations:ListParents
+                  - organizations:ListAWSServiceAccessForOrganization
+                  - organizations:ListAccountsForParent
+                  - organizations:ListAccounts
+                  - organizations:DescribeOrganization
+                  - organizations:ListOrganizationalUnitsForParent
+                  - organizations:ListChildren
+                  - organizations:DescribeAccount
+                  - organizations:DescribeOrganizationalUnit
+                Resource: "*"
+
+        - PolicyName: "Allow-Policy-Management"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - organizations:AttachPolicy
+                  - organizations:ListPoliciesForTarget
+                  - organizations:ListTargetsForPolicy
+                  - organizations:DetachPolicy
+                  - organizations:DisablePolicyType
+                  - organizations:DescribePolicy
+                  - organizations:DescribeEffectivePolicy
+                  - organizations:ListPolicies
+                  - organizations:EnablePolicyType
+                  - organizations:CreatePolicy
+                  - organizations:UpdatePolicy
+                  - organizations:DeletePolicy
+                Resource: "*"
+                Condition:
+                  StringLikeIfExists:
+                    organizations:PolicyType:
+                      - BACKUP_POLICY
+                      - TAG_POLICY
+        - PolicyName: "Allow-DevOpsPerm"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: "Allow"
+                Action:
+                  - s3:*
+                  - sns:*
+                  - lambda:*
+                  - logs:*
+                  - cloudwatch:*
+                  - events:*
+                  - kms:*
+                  - cloudformation:*
+                Resource: "*"
+        - PolicyName: "Allow-IAM-Perm"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: "Allow"
+                Action:
+                  - iam:List*
+                  - iam:Get*
+                  - iam:CreateRole
+                  - iam:UpdateRole
+                  - iam:PassRole
+                  - iam:PutRolePermissionsBoundary
+                  - iam:PutRolePolicy
+                  - iam:UpdateAssumeRolePolicy
+                  - iam:UpdateRoleDescription
+                  - iam:AttachRolePolicy
+                  - iam:CreateServiceLinkedRole
+                  - iam:AddRoleToInstanceProfile
+                  - iam:CreatePolicy
+                Resource: "*"
+        - PolicyName: "Allow-SSO-Perm"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: "Allow"
+                Action:
+                  - sso:ProvisionPermissionSet
+                  - sso:ListPermissionSets
+                  - sso:DeletePermissionsPolicy
+                  - sso:DescribePermissionsPolicies
+                  - sso:ListPermissionSetsProvisionedToAccount
+                  - sso:GetPermissionsPolicy
+                  - sso:DeleteInlinePolicyFromPermissionSet
+                  - sso:DetachManagedPolicyFromPermissionSet
+                  - sso:DeletePermissionSet
+                  - sso:GetPermissionSet
+                  - sso:AttachManagedPolicyToPermissionSet
+                  - sso:CreatePermissionSet
+                  - sso:UpdatePermissionSet
+                  - sso:ListPermissionSetProvisioningStatus
+                  - sso:ListAccountsForProvisionedPermissionSet
+                  - sso:GetInlinePolicyForPermissionSet
+                  - sso:ListManagedPoliciesInPermissionSet
+                  - sso:PutPermissionsPolicy
+                  - sso:DescribePermissionSetProvisioningStatus
+                  - sso:DescribePermissionSet
+                  - sso:PutInlinePolicyToPermissionSet
+                  - sso:ListTagsForResource
+                Resource: "*"
+
+Outputs:
+  AzureDevOpsMemberRoleArn:
+    Description: Azure DevOps Member Role Arn
+    Value: !Ref AzureDevOpsMemberRole

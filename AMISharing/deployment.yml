@@ -1,0 +1,9 @@
+region: us-east-1
+artifactDomain: devops-core
+artifactRepo: serverless-pipelines
+prod:
+  accountId: 035935210323
+dev:
+  accountId: 049265147042
+
+# Account ID for Shared Services

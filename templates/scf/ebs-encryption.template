@@ -1,0 +1,329 @@
+---
+AWSTemplateFormatVersion: '2010-09-09' 
+Description: 'Security: EBS KMS CMK Generation CloudFormation template'
+
+Parameters:
+  EBSKeyAlias:
+    Description: 'CMK Alias Name'
+    Type: String
+    Default: bridgestone-ec2-default-v1
+  KeyAdminRoleName:
+    Description: 'Role Name for Key Administrator' 
+    Type: String
+    Default: DefaultEBSKeyAdmin
+  MaximumExecutionFrequency:
+    Type: String
+    Description: The frequency that you want AWS Config to run evaluations for the rule.
+    MinLength: '1'
+    ConstraintDescription: This parameter is required.
+    AllowedValues:
+      - One_Hour
+      - Three_Hours
+      - Six_Hours
+      - Twelve_Hours
+      - TwentyFour_Hours
+  CTSBOrgId:
+    Description: Organization ID
+    Type: String
+    Default: o-crwgg2cs9e
+  ProdOrgId:
+    Description: Org ID Production
+    Type: String
+    Default: o-w7upbvgl57
+      
+Resources:
+  KMSKey:
+    Type: 'AWS::KMS::Key'
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: F76
+            reason: Need to share this KMS key with other accounts
+    Properties:
+      EnableKeyRotation: true
+      KeyPolicy:
+        Version: '2012-10-17'
+        Statement:
+        - Sid: Enable IAM Root User Permissions
+          Effect: Allow
+          Principal:
+            AWS: !Sub 'arn:aws:iam::${AWS::AccountId}:root'
+          Action: 
+          - 'kms:*'
+          Resource: '*'
+        - Sid: Allow administration of the key
+          Effect: Allow
+          Principal:
+            AWS: !Sub 'arn:aws:iam::${AWS::AccountId}:role/${KMSAdminRole}'
+          Action:
+          - kms:Create*
+          - kms:Describe*
+          - kms:Enable*
+          - kms:List*
+          - kms:Put*
+          - kms:Update*
+          - kms:Revoke*
+          - kms:Disable*
+          - kms:Get*
+          - kms:Delete*
+          - kms:ScheduleKeyDeletion
+          - kms:CancelKeyDeletion
+          Resource: '*'
+        - Sid: Allow use of the key
+          Effect: Allow
+          Principal:
+            AWS: !Sub 'arn:aws:iam::${AWS::AccountId}:root'
+          Action:
+          - 'kms:DescribeKey'
+          - 'kms:Encrypt'
+          - 'kms:Decrypt'
+          - 'kms:ReEncrypt*'
+          - 'kms:GenerateDataKey*'
+          Resource: '*'
+          Condition:
+            StringEquals:
+              'kms:ViaService': !Sub 'ec2.${AWS::Region}.amazonaws.com' 
+        - Sid: Allow attachment of persistent resources
+          Effect: Allow
+          Principal:
+            AWS: !Sub 'arn:aws:iam::${AWS::AccountId}:root'
+          Action:
+          - 'kms:CreateGrant'
+          - 'kms:ListGrants'
+          Resource: '*'
+          Condition:
+            Bool: 
+              'kms:GrantIsForAWSResource': 'true' 
+        - Sid: Allow use of the key cross account in the org
+          Effect: Allow
+          Principal:
+            AWS: '*' # Can limit the scope
+          Action:
+          - 'kms:Decrypt'
+          - 'kms:DescribeKey'
+          - 'kms:Encrypt'
+          - 'kms:ReEncrypt*'
+          - 'kms:GetKeyPolicy'
+          - 'kms:CreateGrant'
+          - 'kms:ListGrants'
+          Resource: '*'
+          Condition: 
+            StringEquals:
+              'aws:PrincipalOrgID': 
+                - !Ref CTSBOrgId
+                - !Ref ProdOrgId
+  
+  KMSEBSKeyAlias:
+    Type: 'AWS::KMS::Alias'
+    Properties:
+      AliasName: !Sub 'alias/${EBSKeyAlias}'
+      TargetKeyId: !Ref KMSKey
+  
+  EBSDefaultEncryptionConfigRule:
+    Type: 'AWS::Config::ConfigRule'
+    DependsOn: KMSKey
+    Properties:
+      ConfigRuleName: EBS-Default-Encryption-Rule
+      Description: >-
+        Check that Amazon Elastic Block Store (EBS) encryption is enabled by
+        default. The rule is NON_COMPLIANT if the encryption is not enabled.
+      InputParameters: {}
+      Scope: {}
+      Source:
+        Owner: AWS
+        SourceIdentifier: EC2_EBS_ENCRYPTION_BY_DEFAULT
+      MaximumExecutionFrequency: !Ref MaximumExecutionFrequency
+  
+  EBSDefaultEncryptionRemediation:
+    Type: 'AWS::Config::RemediationConfiguration'
+    Properties:
+      Automatic: true
+      TargetType: SSM_DOCUMENT
+      ConfigRuleName: !Ref EBSDefaultEncryptionConfigRule
+      TargetId: !Ref EBSDefaultEncryptionSSMDoc
+      MaximumAutomaticAttempts: 1
+      RetryAttemptSeconds: 60
+      Parameters:
+        KmsKeyId:
+          StaticValue:
+            Values:
+              - !Ref EBSKeyAlias
+        AutomationAssumeRole:
+          StaticValue:
+            Values: 
+              - !GetAtt EBSDefaultEncryptionExecutionRole.Arn
+             
+  EBSDefaultEncryptionSSMDoc:
+    Type: 'AWS::SSM::Document'
+    DependsOn: 
+      - EBSDefaultEncryptionExecutionRole
+      - KMSEBSKeyAlias
+    Properties:
+      DocumentType: Automation
+      Content:
+        description: Automation to enable Amazon Elastic Block Store (EBS) encryption
+        schemaVersion: '0.3'
+        assumeRole: '{{AutomationAssumeRole}}'
+        parameters:
+          KmsKeyId:
+            description: customer managed key
+            type: String
+            default: !Sub "alias/${EBSKeyAlias}"
+          AutomationAssumeRole:
+            description: Automation Assumed role
+            type: String
+        mainSteps:
+          - name: EnableEbsEncryptionByDefault
+            description: Enables EBS encryption by default for your account
+            action: 'aws:executeAwsApi'
+            inputs:
+              Service: ec2
+              Api: EnableEbsEncryptionByDefault
+          - name: ModifyEbsDefaultKmsKeyId
+            description: Changes the default customer master key 
+            action: 'aws:executeAwsApi'
+            inputs:
+              Service: ec2
+              Api: ModifyEbsDefaultKmsKeyId
+              KmsKeyId: !Ref KMSKey
+
+  EBSDefaultEncryptionExecutionRole:
+    Type: 'AWS::IAM::Role'
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W11
+            reason: IAM role should not allow * resource on its permissions policy
+    Properties:
+      RoleName: EBSDefaultEncryptionExecutionRole
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+                - ssm.amazonaws.com
+            Action: 'sts:AssumeRole'
+      Policies:
+        - PolicyName: EnableEbsEncryption
+          PolicyDocument:
+            Statement:
+              - Effect: Allow
+                Action: 
+                    - "ec2: EnableEbsEncryptionByDefault"
+                Resource: '*'
+
+  EBSDefaultEncryptionExecutionPolicy:
+    Type: 'AWS::IAM::ManagedPolicy'
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: F5
+            reason: IAM managed policy should not allow * action
+          - id: W13
+            reason: IAM managed policy should not allow * resource
+    Properties:
+      ManagedPolicyName: EBSDefaultEncryptionExecutionPolicy
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Sid: EBSDefaultEncryptionExecutionPolicy
+            Effect: Allow
+            Action:
+              - 'ec2:EnableEbsEncryptionByDefault'
+              - 'ec2:ModifyEbsDefaultKmsKeyId'
+              - 'kms:DescribeKey'
+              - 'kms:Encrypt'
+              - 'kms:Decrypt'
+              - 'kms:ReEncrypt*'
+              - 'kms:GenerateDataKey*'
+              - 'ssm:GetAutomationExecution'
+              - 'ssm:StartAutomationExecution'
+              - 'ssm:GetDocument'
+              - 'logs:CreateLogGroup'
+              - 'logs:CreateLogStream'
+              - 'logs:PutLogEvents'
+              - 'sts:AssumeRole'
+            Resource: '*'
+      Roles:
+        - !Ref EBSDefaultEncryptionExecutionRole
+  
+  KMSAdminRole:
+    Type: 'AWS::IAM::Role'
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: F38
+            reason: Need to allow * resource for this admin role 
+          - id: F3
+            reason: Need to allow * action for this admin role 
+          - id: W11
+            reason: Need to allow * resource for this permission policy
+    Properties:
+      RoleName: !Ref KeyAdminRoleName
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: 'Allow'
+            Principal: 
+              Service: 
+                - "kms.amazonaws.com"
+            Action: 'sts:AssumeRole'
+      Path: '/'
+      Policies:
+        - PolicyName: kmsroot
+          PolicyDocument: 
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:   
+                - "acm:*"
+                -  "acm-pca:*"
+                -  "cloudformation:*"
+                -  "cloudtrail:Describe*"
+                -  "cloudtrail:Get*"
+                -  "cloudtrail:List*"
+                -  "cloudtrail:Lookup*"
+                -  "cloudwatch:*"
+                -  "codebuild:*"
+                -  "codecommit:*"
+                -  "codedeploy:*"
+                -  "codepipeline:*"
+                -  "ec2:Describe*"
+                -  "ec2:Get*"
+                -  "events:*"
+                -  "iam:Get*"
+                -  "iam:List*"
+                -  "iam:PassRole"
+                -  "kms:*"
+                -  "lambda:*"
+                -  "logs:*"
+                -  "s3:CreateBucket"
+                -  "s3:DeleteObject*"
+                -  "s3:Get*"
+                -  "s3:List*"
+                -  "s3:PutObject*"
+                -  "secretsmanager:*"
+                -  "servicequotas:*"
+                -  "sns:*"
+                -  "ssm:*"
+                -  "ssmmessages:*"
+                -  "sts:DecodeAuthorizationMessage"
+                -  "support:*"
+                -  "tag:*"
+                Resource: '*'
+
+Outputs:
+  EBSKeyStackName:
+    Description: 'Stack name'
+    Value: !Sub '${AWS::StackName}'
+  EBSKeyId:
+    Description: 'Key id'
+    Value: !Ref KMSKey
+  EBSKeyArn:
+    Description: 'Key ARN'
+    Value: !GetAtt 'KMSKey.Arn'
+  EBSKeyAliasName:
+    Description: 'Key Alias Name'
+    Value: !Sub 'alias/${EBSKeyAlias}'

@@ -1,0 +1,57 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: Org Query Role assumed by AMI Sharing Lambda
+Parameters:
+  OrganizationQueryRoleName:
+    Type: String
+    Description: The name of IAM role assumed by AMI Sharing Lambda
+    Default: ami-sharing-org-account-query-role
+  SharedServicesAccountId:
+    Type: String
+    Description: The Shared Services Account ID where AMI Sharing Lambda is deployed
+    Default: "035935210323"
+  AMISharingLambdaExecutionRoleName:
+    Type: String
+    Description: The name of IAM role ofAMI Sharing Lambda
+    Default: goldenamisharingrole
+
+Resources:
+  OrganizationQueryRole:
+    Type: "AWS::IAM::Role"
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS:
+              - !Sub arn:aws:iam::${SharedServicesAccountId}:role/${AMISharingLambdaExecutionRoleName}
+            Action:
+              - "sts:AssumeRole"               
+      Path: /
+      RoleName: !Ref OrganizationQueryRoleName
+      Policies:
+        - PolicyName: AllowOrgMemberListing
+          PolicyDocument:
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "organizations:ListAccounts"
+                  - "organizations:DescribeAccount"
+                  - "organizations:ListPoliciesForTarget"
+                  - "organizations:ListParents"
+                  - "organizations:ListAccountsForParent"
+                  - "organizations:ListRoots"
+                  - "organizations:DescribeOrganization"
+                  - "organizations:DescribeOrganizationalUnit"
+                  - "organizations:ListOrganizationalUnitsForParent"
+                  - "organizations:ListAWSServiceAccessForOrganization"
+                  - "organizations:ListChildren"
+                  - "organizations:ListTagsForResource"
+                Resource: "*"
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W11
+            reason: >-
+              Organizations doesn't have arns, so we have to use an asterisk in
+              the policy

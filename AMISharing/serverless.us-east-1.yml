@@ -1,0 +1,215 @@
+service: ami-sharing
+
+plugins:
+  - serverless-pseudo-parameters
+  - serverless-python-requirements
+
+provider:
+  name: aws
+  stackTags:
+    bsam:pipeline:stackname: ${self:service}-${opt:stage}
+    bsam:pipeline:repo: ${self:custom.tagParameters.repositoryname}
+    bsam:pipeline:branch: ${self:custom.tagParameters.branchname-${opt:stage}}
+  runtime: python3.8
+  stage: ${opt:stage, self:custom.defaultStage}
+  region: ${opt:region, 'us-east-1'}
+
+custom:
+  pythonRequirements:
+    layer: true
+  deploymentRegion: ${opt:region, 'us-east-1'}
+  tagParameters:
+    repositoryname: AMISharing
+    branchname-dev: Support-DevInt
+    branchname-prod: Support  
+
+package:
+  exclude:
+    - "./**"
+  include:
+    - src/**
+
+functions: 
+  amiSharing:
+    handler: "src/functions/ami_sharing.handler"
+    role: GoldenAMISharingExecutionRole
+    layers:
+      - { Ref: PythonRequirementsLambdaLayer }
+    memorySize: 1024
+    timeout: 900
+    environment:
+      MasterAccountId: ${file(serverless.${opt:stage}.yaml):MasterAccountId}
+      OrgAccountQueryRole: ${file(serverless.${opt:stage}.yaml):OrgAccountQueryRole}
+      NotificationEmailAddress: ${file(serverless.${opt:stage}.yaml):NotificationEmailAddress}
+  amiUnSharing:
+    handler: "src/functions/ami_unsharing.lambda_handler"
+    role: GoldenAMISharingExecutionRole
+    layers:
+      - { Ref: PythonRequirementsLambdaLayer }
+    memorySize: 512
+    timeout: 900
+    environment:
+      DaysToKeepAmi: 183 #6 months plus a day for leap year
+    events:
+      - eventBridge:
+          schedule: rate(30 days)
+
+resources:
+  Description: Serverless - ${self:custom.tagParameters.repositoryname} Repo Pipeline
+  Resources:
+    GoldenAMISharingExecutionRole:
+      Type: AWS::IAM::Role
+      Properties:
+        RoleName: goldenamisharingrole
+        AssumeRolePolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Principal:
+                Service:
+                - lambda.amazonaws.com
+              Action:
+                - sts:AssumeRole
+        Policies:
+          - PolicyName: allow-assume-role
+            PolicyDocument:
+              Version: '2012-10-17'
+              Statement:
+                - Effect: Allow
+                  Action:
+                    - sts:AssumeRole
+                  Resource: arn:aws:iam::${file(serverless.${opt:stage}.yaml):MasterAccountId}:role/${file(serverless.${opt:stage}.yaml):OrgAccountQueryRole}
+          - PolicyName: modify-image-attributes
+            PolicyDocument:
+              Version: '2012-10-17'
+              Statement:
+                - Effect: Allow
+                  Action:
+                    - ec2:ModifyImageAttribute
+                    - ec2:DescribeImages
+                    - ec2:DescribeImageAttribute
+                  Resource: "*"
+          - PolicyName: create-log-streams
+            PolicyDocument:
+              Version: '2012-10-17'
+              Statement:
+                - Effect: Allow
+                  Action:
+                    - 'logs:CreateLogGroup'
+                    - 'logs:CreateLogStream'
+                    - 'logs:PutLogEvents'
+                  Resource: 
+                    - !Sub "arn:aws:logs:us-east-1:#{AWS::AccountId}:log-group:/aws/lambda/*"
+          - PolicyName: sqs-permissions
+            PolicyDocument: 
+              Statement: 
+                - Effect: Allow
+                  Action: 
+                    - 'sqs:DeleteMessage'
+                    - 'sqs:ReceiveMessage'
+                    - 'sqs:GetQueueAttributes'
+                  Resource: 
+                    - !GetAtt AmiQueue.Arn
+          - PolicyName: lambda-permissions
+            PolicyDocument:
+              Statement:
+                - Effect: Allow
+                  Action: 
+                    - lambda:CreateEventSourceMapping
+                    - lambda:ListEventSourceMappings
+                    - lambda:ListFunctions
+                  Resource: "*"
+    AmiBuilderNotificationTopic:
+          Type: "AWS::SNS::Topic"
+          Properties:
+            Subscription:
+              -
+                Endpoint: ${file(serverless.${opt:stage}.yaml):NotificationEmailAddress}
+                Protocol: "email"
+            TopicName: "AmiBuilder-Notify"
+    AmiBuilderNotificationTopicPolicy:
+      Type: AWS::SNS::TopicPolicy
+      Properties:
+        PolicyDocument:
+          Id: AllowCloudwatchEventsToPublish
+          Version: '2012-10-17'
+          Statement:
+            -
+              Sid: Builder Topic
+              Effect: Allow
+              Principal:
+                Service: "events.amazonaws.com"
+              Action: 
+                  - sns:Publish
+                  - sns:Subscribe
+                  - sns:GetTopicAttributes
+                  - sns:SetTopicAttributes
+              Resource: !Ref AmiBuilderNotificationTopic
+        Topics:
+          - !Ref AmiBuilderNotificationTopic
+    AmiBuilderCustomEvent:
+      Type: "AWS::Events::Rule"
+      Properties:
+        Description: "AmiBuilder-Complete"
+        EventPattern:
+          source:
+            - "aws.ec2"
+          detail-type:
+            - "AWS API Call via CloudTrail"
+          detail:
+            eventName:
+              - "CreateImage"
+            eventSource:
+              - "ec2.amazonaws.com"
+            requestParameters:
+              name:
+                - prefix: BSAM
+        State: "ENABLED"
+        Targets:
+          -
+            Id: "NewAMI-Notify"
+            Arn: !Ref AmiBuilderNotificationTopic
+          -
+            Id: "Sharing-SQS-Trigger"
+            Arn: !GetAtt AmiQueue.Arn
+    PermissionForSqsToInvokeSharingLambda:
+      Type: AWS::Lambda::Permission
+      DependsOn: AmiQueue
+      Properties:
+        FunctionName: !GetAtt AmiSharingLambdaFunction.Arn
+        Action: "lambda:InvokeFunction"
+        Principal: "sqs.amazonaws.com"
+        SourceArn: !GetAtt AmiQueue.Arn
+    AmiQueue:
+      Type: AWS::SQS::Queue
+      Properties:
+        DelaySeconds: 300
+        VisibilityTimeout: 900
+        #FifoQueue: Boolean
+        QueueName: bridgestone-sqs-ami
+        #ReceiveMessageWaitTimeSeconds: Integer
+    LambdaSqsSourcing:
+      Type: AWS::Lambda::EventSourceMapping
+      DependsOn: AmiQueue
+      Properties: 
+        Enabled: True
+        EventSourceArn: !GetAtt AmiQueue.Arn
+        FunctionName: !GetAtt AmiSharingLambdaFunction.Arn
+    QueuePolicy:
+      Type: AWS::SQS::QueuePolicy
+      DependsOn: AmiQueue
+      Properties:
+        Queues: 
+          - !Ref AmiQueue  
+        PolicyDocument: 
+          Version: "2012-10-17"
+          Id: SQSPolicy
+          Statement: 
+            - Effect: "Allow"
+              Action: 
+                - "SQS:SendMessage" 
+                - "SQS:ReceiveMessage"
+              Principal:  
+                Service: 
+                  - events.amazonaws.com
+              Resource: !GetAtt AmiQueue.Arn             

@@ -1,0 +1,96 @@
+{
+    "plans": {
+        "Standard": {
+            "regions": {
+                "@@assign": [
+                    "us-east-1",
+                    "us-west-2"
+                ]
+            },
+            "rules": {
+                "12H": {
+                    "schedule_expression": {
+                        "@@assign": "cron(0 5/12 ? * * *)"
+                    },
+                    "start_backup_window_minutes": {
+                        "@@assign": "60"
+                    },
+                    "complete_backup_window_minutes": {
+                        "@@assign": "180"
+                    },
+                    "lifecycle": {
+                        "delete_after_days": {
+                            "@@assign": "35"
+                        }
+                    },
+                    "target_backup_vault_name": {
+                        "@@assign": "Default"
+                    }
+                }
+            },
+            "selections": {
+                "tags": {
+                    "standard": {
+                        "iam_role_arn": {
+                            "@@assign": "arn:aws:iam::$account:role/AWSBackupRole"
+                        },
+                        "tag_key": {
+                            "@@assign": "Backup"
+                        },
+                        "tag_value": {
+                            "@@assign": [
+                                "TRUE"
+                            ]
+                        }
+                    }
+                }
+            }
+        },
+        "Weekly": {
+            "regions": {
+                "@@assign": [
+                    "us-east-1",
+                    "us-west-2"
+                ]
+            },
+            "rules": {
+                "Weekly": {
+                    "schedule_expression": {
+                        "@@assign": "cron(0 5 ? * 7 *)"
+                    },
+                    "start_backup_window_minutes": {
+                        "@@assign": "60"
+                    },
+                    "complete_backup_window_minutes": {
+                        "@@assign": "180"
+                    },
+                    "lifecycle": {
+                        "delete_after_days": {
+                            "@@assign": "35"
+                        }
+                    },
+                    "target_backup_vault_name": {
+                        "@@assign": "Default"
+                    }
+                }
+            },
+            "selections": {
+                "tags": {
+                    "ami": {
+                        "iam_role_arn": {
+                            "@@assign": "arn:aws:iam::$account:role/AWSBackupRole"
+                        },
+                        "tag_key": {
+                            "@@assign": "Backup"
+                        },
+                        "tag_value": {
+                            "@@assign": [
+                                "AMI"
+                            ]
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

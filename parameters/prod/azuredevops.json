@@ -1,0 +1,98 @@
+[
+    {
+        "ParameterKey": "VPCId",
+        "ParameterValue": "vpc-0051de8f34a38a362"
+    },
+    {
+        "ParameterKey": "UbuntuSubnetA",
+        "ParameterValue": "subnet-02612c943fba09eab"
+    },
+    {
+        "ParameterKey": "UbuntuSubnetB",
+        "ParameterValue": "subnet-0c3857a04b0ab36ea"
+    },
+    {
+        "ParameterKey": "AzureDevOpsSecurityGroupName",
+        "ParameterValue": "AzureDevOpsSecurityGroup"
+    },
+    {
+        "ParameterKey": "SharedServicesAccountId",
+        "ParameterValue": "035935210323"
+    },
+    {
+        "ParameterKey": "DeviceName",
+        "ParameterValue": "/dev/sda1"
+    },
+    {
+        "ParameterKey": "DeleteOnTermination",
+        "ParameterValue": "true"
+    },
+    {
+        "ParameterKey": "VolumeSize",
+        "ParameterValue": "50"
+    },
+    {
+        "ParameterKey": "VolumeType",
+        "ParameterValue": "gp2"
+    },
+    {
+        "ParameterKey": "EbsOptimized",
+        "ParameterValue": "false"
+    },
+    {
+        "ParameterKey": "UbuntuImageAMI",
+        "ParameterValue": "ami-042e8287309f5df03"
+    },
+    {
+        "ParameterKey": "AzureDevOpsRunnerInstanceType",
+        "ParameterValue": "t3.medium"
+    },
+    {
+        "ParameterKey": "AzureRunnerLaunchTemplateName",
+        "ParameterValue": "AzureDevOps-Runners-LaunchTemplate"
+    },
+    {
+        "ParameterKey": "AutoScalingGroupName",
+        "ParameterValue": "ASG-AzureDevOps-Runners"
+    },
+    {
+        "ParameterKey": "Cooldown",
+        "ParameterValue": "60"
+    },
+    {
+        "ParameterKey": "DesiredCapacity",
+        "ParameterValue": "1"
+    },
+    {
+        "ParameterKey": "MaxSize",
+        "ParameterValue": "2"
+    },
+    {
+        "ParameterKey": "MinSize",
+        "ParameterValue": "1"
+    },
+    {
+        "ParameterKey": "AzureRunnerLaunchTemplateVersion",
+        "ParameterValue": "1"
+    },
+    {
+        "ParameterKey": "CreateGoldenAmiPipeline",
+        "ParameterValue": "false"
+    },
+    {
+        "ParameterKey": "CreateCFNPipeline",
+        "ParameterValue": "false"
+    },
+    {
+        "ParameterKey": "CreateControlTowerPipeline",
+        "ParameterValue": "true"
+    },
+    {
+        "ParameterKey": "CreateServerlessFrameworkPipeline",
+        "ParameterValue": "true"
+    },
+    {
+        "ParameterKey": "DevOpsArtifactDomainName",
+        "ParameterValue": "devops-core"
+    }
+]

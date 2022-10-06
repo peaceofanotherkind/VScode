@@ -1,0 +1,92 @@
+trigger:
+  branches:
+    include:
+      - Support_DevInt
+      - Support
+
+variables:
+  - group: globals
+  - name: SLS_ARTIFACT_NAME
+    value: "npm-packages"
+  - name: DEV_BRANCH
+    value: refs/heads/Support_DevInt
+  - name: PROD_BRANCH
+    value: refs/heads/Support
+
+  - ${{ if eq(variables['Build.SourceBranchName'], 'Support') }}:
+      - name: pool_name
+        value: $(PROD_POOL_NAME)
+      - name: container_tag
+        value: $(PROD_TAG_NAME_SERVERLESS)
+      - name: ss_account_id
+        value: $(PROD_SS_ACCOUNT_ID)
+      - name: environment
+        value: prod
+
+  - ${{ if eq(variables['Build.SourceBranchName'], 'Support_DevInt') }}: # DEV
+      - name: pool_name
+        value: $(DEV_POOL_NAME)
+      - name: container_tag
+        value: $(DEV_TAG_NAME_SERVERLESS)
+      - name: ss_account_id
+        value: $(DEV_SS_ACCOUNT_ID)
+      - name: environment
+        value: dev
+
+pool: $(pool_name)
+
+parameters:
+  - name: accounts
+    type: object
+    default:
+    - account10
+    - account2
+  - name: regions
+    type: object
+    default:
+    - us-east-1
+    - us-west-2
+
+# extends:
+#   template: deployment.yml
+
+
+jobs:
+  # - ${{ each account in parameters.accounts }}:
+  #   - ${{ each region in parameters.regions }}:
+
+  - job: firstjob
+    displayName: Export Variables for Py Scanning
+    steps:
+    - bash: |
+        export ACCOUNT="${{ convertToJson(parameters.accounts[0]) }}"
+        echo $ACCOUNT
+        echo "##vso[task.setvariable variable=account;isOutput=true]$ACCOUNT"
+        export REGION="${{ convertToJson(parameters.regions[0]) }}"
+        echo $REGION
+        echo "##vso[task.setvariable variable=region;isOutput=true]$REGION"
+      name: exportstep
+    - bash: |
+        echo "$(exportstep.ACCOUNT)"
+        echo "$(exportstep.REGION)"
+   # - bash:
+      # ls -la
+      # echo This is ${{ account }}
+        # export AWS_ACCOUNT_NAME=`cat deployment.yml | yq -r .${{ account }}.accountname`
+        # echo $AWS_ACCOUNT_NAME
+      # export ACCOUNT_ID=`cat deployment.yml | yq -r .${{ account }}.$ENVIRONMENT.accountId`
+      # echo $ACCOUNT_ID
+
+      # #export AWS_DEFAULT_REGION=`cat deployment.yml | yq -r .region`
+      # AWS_DEFAULT_REGION=${{ region }}
+      # echo $AWS_DEFAULT_REGION
+  - job: second_job
+ #   displayName: read variables # ${{ first account in parameters.accounts }}_${{ region in parameters.regions }}
+    dependsOn: firstjob
+    variables:
+      account: $[ dependencies.firstjob.outputs['exportstep.account'] ]
+      region: $[ dependencies.firstjob.outputs['exportstep.region'] ]
+    steps:
+      - bash: |
+          echo "$(account)"
+          echo "$(region)"

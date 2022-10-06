@@ -1,0 +1,59 @@
+account1:
+  accountname: CentralLogging
+  prod:
+    accountId: 737632143800
+  dev:
+    accountId: 503401150898
+
+# Account ID for CentralLogging Account
+
+account2:
+  accountname: Audit
+  prod:
+    accountId: 247519557298
+  dev:
+    accountId: 620506817283
+
+# # Account ID for Audit Account
+# parameters:
+# - name: accountinfo
+#   type: object
+#   default:
+#     accounts:
+#     - account1
+#     - account2
+#     accountname:
+#       account1: CentralLogging
+#       account2: Audit
+#     accountId-dev:
+#       account1: 503401150898
+#       account2: 620506817283
+#     accountId-prod:
+#       account1: 737632143800
+#       account2: 247519557298
+# - name: regions
+#   type: object
+#   default:
+#   - us-east-1
+#   - us-west-2
+# parameters:
+# - name: accountinfo
+#   type: object
+#   default:
+#     accounts:
+#     - account1
+#     - account2
+#     accountname:
+#       account1: CentralLogging
+#       account2: Audit
+#     accountId-dev:
+#       account1: 503401150898
+#       account2: 620506817283
+#     accountId-prod:
+#       account1: 737632143800
+#       account2: 247519557298
+# - name: regions
+#   type: object
+#   default:
+#   - us-east-1
+#   - us-west-2

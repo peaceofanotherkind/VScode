@@ -1,0 +1,80 @@
+{
+    "tags": {
+        "Account":{
+            "tag_key": {
+                "@@assign": "Account"
+            }
+        },
+        "Application":{
+            "tag_key": {
+                "@@assign": "Application"
+            }
+        },
+        "Backup": {
+            "tag_key": {
+                "@@assign": "Backup"
+            }
+        },
+        "Compliance": {
+            "tag_key": {
+                "@@assign": "Compliance"
+            }
+        },
+        "Cost Center": {
+            "tag_key": {
+                "@@assign": "Cost Center"
+            }
+        },
+        "CrossRegion": {
+            "tag_key": {
+                "@@assign": "CrossRegion"
+            }
+        },
+        "DataClassification": {
+            "tag_key": {
+                "@@assign": "DataClassification"
+            }
+        },
+        "DR": {
+            "tag_key": {
+                "@@assign": "DR"
+            }
+        },
+        "DutySchedule": {
+            "tag_key": {
+                "@@assign": "DutySchedule"
+            }
+        },
+        "Environment": {
+            "tag_key": {
+                "@@assign": "Environment"
+            }
+        },
+        "Lifecycle": {
+            "tag_key": {
+                "@@assign": "Lifecycle"
+            }
+        },
+        "OwnerID": {
+            "tag_key": {
+                "@@assign": "OwnerID"
+            }
+        },
+        "ReservedResource": {
+            "tag_key": {
+                "@@assign": "ReservedResource"
+            }
+        },
+        "SupportProvider": {
+            "tag_key": {
+                "@@assign": "SupportProvider"
+            }
+        },
+        "Ticket": {
+            "tag_key": {
+                "@@assign": "Ticket"
+            }
+        }
+    }
+}
+

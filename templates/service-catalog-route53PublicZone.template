@@ -1,0 +1,257 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: Route53 Public Zone Service Catalog product
+
+
+Parameters:
+  MasterPortfolioId:
+    Description: Master Route53PublicZone portfoilio ID
+    Type: String
+
+  MasterProductId:
+    Description: Master Route53PublicZone product ID
+    Type: String
+
+  RoleName01:
+    Type: String
+    Description: Assign permission to given IAM role
+    Default: ""
+
+  PermissionSet01:
+    Type: String
+    Description: Assign permission to given AWS SSO Permission set
+    Default: ""
+
+  PermissionSet02:
+    Type: String
+    Description: Assign permission to given AWS SSO Permission set
+    Default: ""
+
+  PermissionSet03:
+    Type: String
+    Description: Assign permission to given AWS SSO Permission set
+    Default: ""
+
+  PermissionSet04:
+    Type: String
+    Description: Assign permission to given AWS SSO Permission set
+    Default: ""
+
+  PermissionSet05:
+    Type: String
+    Description: Assign permission to given AWS SSO Permission set
+    Default: ""
+
+  ProviderName:
+    Description: Provider name
+    Type: String
+    Default: NotSet
+
+Conditions:
+  RoleName01: !Not [ !Equals [ !Ref RoleName01, '' ] ]
+  PermissionSet01: !Not [ !Equals [ !Ref PermissionSet01, '' ] ]
+  PermissionSet02: !Not [ !Equals [ !Ref PermissionSet02, '' ] ]
+  PermissionSet03: !Not [ !Equals [ !Ref PermissionSet03, '' ] ]
+  PermissionSet04: !Not [ !Equals [ !Ref PermissionSet04, '' ] ]
+  PermissionSet05: !Not [ !Equals [ !Ref PermissionSet05, '' ] ]
+
+
+Resources:
+
+###################################
+# Service Catalog Portfolio setup #
+###################################
+
+  LocalPortfolio:
+    Type: "AWS::ServiceCatalog::Portfolio"
+    Properties:
+      AcceptLanguage: "en"
+      Description: "Route53PublicZone"
+      DisplayName: "Route53PublicZone"
+      ProviderName: !Ref ProviderName
+
+  LocalPortfolioProductAssociation:
+    Type: "AWS::ServiceCatalog::PortfolioProductAssociation"
+    Properties:
+      AcceptLanguage: "en"
+      PortfolioId: !Ref LocalPortfolio
+      ProductId: !Ref MasterProductId
+      SourcePortfolioId: !Ref MasterPortfolioId
+
+
+###############################
+# Service Catalog Permissions #
+###############################
+
+  # AssociationRole01: #Comment out for BSAM
+  #   Condition: RoleName01
+  #   Type: "AWS::ServiceCatalog::PortfolioPrincipalAssociation"
+  #   Properties:
+  #     AcceptLanguage: "en"
+  #     PortfolioId: !Ref LocalPortfolio
+  #     PrincipalARN: !Sub arn:aws:iam::${AWS::AccountId}:role/${RoleName01}
+  #     PrincipalType: IAM
+
+
+  SSOPermissionSetToRole01:
+    Condition: PermissionSet01
+    Type: AWS::CloudFormation::CustomResource
+    Properties:
+      ServiceToken: !GetAtt SSOPermissionSetToRoleLambda.Arn
+      PermissionSet: !Ref PermissionSet01
+  AssociationPermissionSet01:
+    Condition: PermissionSet01
+    Type: "AWS::ServiceCatalog::PortfolioPrincipalAssociation"
+    Properties:
+      AcceptLanguage: "en"
+      PortfolioId: !Ref LocalPortfolio
+      PrincipalARN: !GetAtt SSOPermissionSetToRole01.RoleARN
+      PrincipalType: IAM   
+
+  SSOPermissionSetToRole02:
+    Condition: PermissionSet02
+    Type: AWS::CloudFormation::CustomResource
+    Properties:
+      ServiceToken: !GetAtt SSOPermissionSetToRoleLambda.Arn
+      PermissionSet: !Ref PermissionSet02
+  AssociationPermissionSet02:
+    Condition: PermissionSet02
+    Type: "AWS::ServiceCatalog::PortfolioPrincipalAssociation"
+    Properties:
+      AcceptLanguage: "en"
+      PortfolioId: !Ref LocalPortfolio
+      PrincipalARN: !GetAtt SSOPermissionSetToRole02.RoleARN
+      PrincipalType: IAM
+
+  SSOPermissionSetToRole03:
+    Condition: PermissionSet03
+    Type: AWS::CloudFormation::CustomResource
+    Properties:
+      ServiceToken: !GetAtt SSOPermissionSetToRoleLambda.Arn
+      PermissionSet: !Ref PermissionSet03
+  AssociationPermissionSet03:
+    Condition: PermissionSet03
+    Type: "AWS::ServiceCatalog::PortfolioPrincipalAssociation"
+    Properties:
+      AcceptLanguage: "en"
+      PortfolioId: !Ref LocalPortfolio
+      PrincipalARN: !GetAtt SSOPermissionSetToRole03.RoleARN
+      PrincipalType: IAM         
+
+  SSOPermissionSetToRole04:
+    Condition: PermissionSet04
+    Type: AWS::CloudFormation::CustomResource
+    Properties:
+      ServiceToken: !GetAtt SSOPermissionSetToRoleLambda.Arn
+      PermissionSet: !Ref PermissionSet04
+  AssociationPermissionSet04:
+    Condition: PermissionSet04
+    Type: "AWS::ServiceCatalog::PortfolioPrincipalAssociation"
+    Properties:
+      AcceptLanguage: "en"
+      PortfolioId: !Ref LocalPortfolio
+      PrincipalARN: !GetAtt SSOPermissionSetToRole04.RoleARN
+      PrincipalType: IAM        
+
+  SSOPermissionSetToRole05:
+    Condition: PermissionSet05
+    Type: AWS::CloudFormation::CustomResource
+    Properties:
+      ServiceToken: !GetAtt SSOPermissionSetToRoleLambda.Arn
+      PermissionSet: !Ref PermissionSet05
+  AssociationPermissionSet05:
+    Condition: PermissionSet05
+    Type: "AWS::ServiceCatalog::PortfolioPrincipalAssociation"
+    Properties:
+      AcceptLanguage: "en"
+      PortfolioId: !Ref LocalPortfolio
+      PrincipalARN: !GetAtt SSOPermissionSetToRole05.RoleARN
+      PrincipalType: IAM  
+
+
+  SSOPermissionSetToRoleLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Path: /
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Policies:
+        - PolicyName: lambda
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - iam:ListRoles
+                Resource: "*"
+
+
+  SSOPermissionSetToRoleLambda:
+    # AWS SSO has a random string appended to the end of role names.
+    # This Custom Resources gets a name of an AWS SSO permission Set
+    # and returns the full role ARN for Service Catalog to work 
+    Type: AWS::Lambda::Function
+    Properties:
+      Runtime: python3.7
+      Handler: index.handler
+      MemorySize: 128
+      Role: !GetAtt SSOPermissionSetToRoleLambdaRole.Arn
+      Timeout: 30
+      Code:
+        ZipFile: |
+            import boto3
+            import cfnresponse
+            import traceback
+
+            def handler(event, context):
+              response_payload = {}
+              response_status = cfnresponse.FAILED
+              physical_resource_id = "unset"
+              print(f"event is {event}")
+
+              if 'PhysicalResourceId' in event:
+                existing_physical_resource_id = event['PhysicalResourceId']
+
+              try:
+                if event['RequestType'] == 'Delete':
+                  physical_resource_id = existing_physical_resource_id
+                  response_status = cfnresponse.SUCCESS
+
+                else:
+                  # Create or Update:
+                  rolename = event['ResourceProperties']['PermissionSet']
+                  physical_resource_id = f'{rolename}-RoleLookup'
+
+                  # Look for any role names that start with AWSReservedSSO_<role>
+                  iam = boto3.resource('iam')
+                  for role in iam.roles.all():
+                    if role.name.startswith(f'AWSReservedSSO_{rolename}_'):
+                      response_payload['RoleARN'] = role.arn
+                      response_status = cfnresponse.SUCCESS
+                      break
+                  
+                  if 'RoleARN' not in response_payload:
+                    print(f'Could not fine any IAM roles starting with AWSReservedSSO_{rolename}_')
+
+              except Exception as e:
+                print('ERROR: Caught exception:')
+                print(e)
+                traceback.print_exc()
+              
+              finally:
+                print('Sending response:')
+                print(response_status)
+                print(response_payload)
+                cfnresponse.send(event, context, response_status, response_payload, physical_resource_id)

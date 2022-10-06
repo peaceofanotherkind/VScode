@@ -1,0 +1,91 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: >-
+  This CFT Template will create the AWS Backup resources used for the backup
+  policies
+Parameters:
+  BackupIAMRoleName:
+    Description: The IAM Role Name that will be used by the AWS Backup service
+    Type: String
+Resources:
+  KMSKeyBackupService:
+    Type: 'AWS::KMS::Key'
+    Properties:
+      Description: KMS Key used by the AWS Backup service
+      Enabled: True
+      EnableKeyRotation: True
+      Tags:
+        - Key: service
+          Value: AWSBackup
+      KeyPolicy:
+        Version: 2012-10-17
+        Statement:
+          - Sid: Enable IAM User Permissions
+            Effect: Allow
+            Principal:
+              AWS: !Sub 'arn:${AWS::Partition}:iam::${AWS::AccountId}:root'
+            Action: 'kms:*'
+            Resource: '*'
+          - Sid: >-
+              Allow access through AWS Backup for all principals in the account
+              that are authorized to use AWS Backup
+            Effect: Allow
+            Principal:
+              AWS: '*'
+            Action:
+              - 'kms:Encrypt'
+              - 'kms:Decrypt'
+              - 'kms:ReEncrypt*'
+              - 'kms:GenerateDataKey*'
+              - 'kms:CreateGrant'
+              - 'kms:ListGrants'
+              - 'kms:DescribeKey'
+            Resource: '*'
+            Condition:
+              StringEquals:
+                'kms:ViaService': !Sub 'backup.${AWS::Region}.amazonaws.com'
+                'kms:CallerAccount': !Sub '${AWS::AccountId}'
+  KMSKeyBackupAlias:
+    Type: 'AWS::KMS::Alias'
+    Properties:
+      AliasName: !Sub 'alias/backup-${AWS::StackName}'
+      TargetKeyId: !Ref KMSKeyBackupService
+  BackupIAMRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Ref BackupIAMRoleName
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+               Service:
+                - backup.amazonaws.com 
+            Action: 'sts:AssumeRole'
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSBackupServiceRolePolicyForBackup
+        - arn:aws:iam::aws:policy/service-role/AWSBackupServiceRolePolicyForRestores
+
+Outputs:
+  TemplateID:
+    Description: ID of the CloudFormation Template
+    Value: scf-ctw-org-policies/bfusa-bp
+  TemplateVersion:
+    Description: Version of the CFT
+    Value: v1.0
+  StackName:
+    Description: CFT Stack name
+    Value: !Sub '${AWS::StackName}'
+  KMSKeyBackupId:
+    Description: KMS Key ID
+    Value: !Ref KMSKeyBackupService
+  KMSKeyBackupArn:
+    Description: KMS Key ARN
+    Value: !GetAtt 
+      - KMSKeyBackupService
+      - Arn
+  KMSKeyBackupAlias:
+    Description: KMS Key Alias
+    Value: !Ref KMSKeyBackupAlias
+  BackupIAMRoleARN:
+    Description: AWS Backup IAM Role ARN
+    Value: !Sub 'arn:${AWS::Partition}:iam::${AWS::AccountId}:role/${BackupIAMRoleName}'

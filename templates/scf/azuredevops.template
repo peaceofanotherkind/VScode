@@ -1,0 +1,536 @@
+#######################################################################################################################
+#  Company: Accenture                                                                                                 #
+#  Project:  AzureDevOps System by Accenture Cloud Security                                                           #
+#  Author & Lead Engineer: Vahagn Madatyan                                                                            #
+#  Co-Author: Karen Mui, Leeba Erlbaum                                                                                #                                                                                                         #
+#  Lead PM & QA: Isaac Zapata                                                                                         #                                                                                                                     #                                                            #
+#######################################################################################################################
+
+---
+AWSTemplateFormatVersion: 2010-09-09
+Description: Deploys dependecies required by AzureDevops
+
+Parameters:
+  ##################################################################################
+  ##################################################################################
+  # Network
+
+  VPCId:
+    Type: "AWS::EC2::VPC::Id"
+    Description: Select the VPC where the EC2 instances will be created
+  UbuntuSubnetA:
+    Type: "AWS::EC2::Subnet::Id"
+    Description: Select subnet for Linux Instance
+  UbuntuSubnetB:
+    Type: "AWS::EC2::Subnet::Id"
+    Description: Select subnet for Linux Instance
+
+  ##################################################################################
+  ##################################################################################
+  # SecurityGroup
+
+  SharedServicesAccountId:
+    Description: Shared Services account ID
+    Type: String
+
+  AzureDevOpsSecurityGroupName:
+    Description: Name for the security group.
+    Default: AzureDevOpsSecurityGroup
+    Type: String
+    ConstraintDescription: must contain only alphanumberic characters
+
+  ##################################################################################
+  ##################################################################################
+  # LaunchTemplate
+
+  DeviceName:
+    Description: (Required) The device name exposed to the EC2 instance (for example, /dev/sdh or xvdh).
+    Type: String
+
+  DeleteOnTermination:
+    Type: String
+    Description: Should EBS volumes be deleted upon instance termination?
+    AllowedValues:
+      - "true"
+      - "false"
+
+  VolumeSize:
+    Description: (Required) The volume size, in Gibibytes (GiB). This can be a number from 1-1,024 for standard, 4-16,384 for io1, 1-16,384 for gp2, and 500-16,384 for st1 and sc1.
+    Type: Number
+
+  VolumeType:
+    Description: The volume type, which can be standard for Magnetic, io1 for Provisioned IOPS SSD, gp2 for General Purpose SSD, st1 for Throughput Optimized HDD, or sc1 for Cold HDD.
+    Type: String
+
+  EbsOptimized:
+    Description: Specifies whether the launch configuration is optimized for EBS I/O (true) or not (false). Additional fees are incurred when you enable EBS optimization for an instance type that is not EBS-optimized by default.
+    Type: String
+
+  UbuntuImageAMI:
+    Description: (Required) Provides the unique ID of the Amazon Machine Image (AMI) that was assigned during registration.
+    Type: "AWS::EC2::Image::Id"
+
+  AzureDevOpsRunnerInstanceType:
+    Description: (Required) Specifies the instance type of the EC2 instance.
+    Type: String
+
+  AzureRunnerLaunchTemplateName:
+    Description: The name of the launch template. This name must be unique per Region per account.
+    Type: String
+
+  ##################################################################################
+  ##################################################################################
+  # AutoScalingGroup
+
+  AutoScalingGroupName:
+    Description: The name of the Auto Scaling group. This name must be unique per Region per account.
+    Type: String
+
+  Cooldown:
+    Description: The amount of time, in seconds, after a scaling activity completes before another scaling activity can start.
+    Type: Number
+
+  DesiredCapacity:
+    Description: The desired capacity is the initial capacity of the Auto Scaling group at the time of its creation and the capacity it attempts to maintain. The number must be greater than or equal to the minimum size of the group and less than or equal to the maximum size of the group. If you do not specify a desired capacity, the default is the minimum size of the group.
+    Type: String
+
+  MaxSize:
+    Description: The maximum size of the Auto Scaling group.
+    Type: String
+
+  MinSize:
+    Description: The minimum size of the Auto Scaling group.
+    Type: String
+
+  AzureRunnerLaunchTemplateVersion:
+    Description: The version of the launch configuration. Since this is the initial launch, it is 1
+    Type: Number
+
+  CreateGoldenAmiPipeline:
+    Type: String
+    Description: Create golden ami pipeline?
+    AllowedValues:
+      - true
+      - false
+
+  ##################################################################################
+  ##################################################################################
+  # DevOpsConfiguration
+
+  CreateCFNPipeline:
+    Type: String
+    Description: Create cloudformation pipeline?
+    AllowedValues:
+      - true
+      - false
+  CreateControlTowerPipeline:
+    Type: String
+    Description: Create control tower pipeline?
+    AllowedValues:
+      - true
+      - false
+  CreateServerlessFrameworkPipeline:
+    Type: String
+    Description: Create serverless framework pipeline?
+    AllowedValues:
+      - true
+      - false
+  DevOpsArtifactDomainName:
+    Type: String
+    Description: DevOps CodeArtifact domain name.
+
+Conditions:
+  CreatePangolinECR: !Equals [!Ref CreateGoldenAmiPipeline, true]
+  CreateDragonFlyECR: !Equals [!Ref CreateCFNPipeline, true]
+  CreateLotusECR: !Equals [!Ref CreateControlTowerPipeline, true]
+  CreateCowabungaECR: !Equals [!Ref CreateServerlessFrameworkPipeline, true]
+
+Resources:
+  ##################################################################################
+  ##################################################################################
+  ##AZURE DEVOPS SECURITY GROUP CREATION##
+
+  AzureDevOpsSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allowing only outbound HTTP and HTTPS
+      GroupName: !Ref AzureDevOpsSecurityGroupName
+      SecurityGroupEgress:
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: "0.0.0.0/0"
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: "0.0.0.0/0"
+        - IpProtocol: tcp
+          FromPort: 0
+          ToPort: 65535
+          CidrIp: "10.0.0.0/8"
+      VpcId: !Ref VPCId
+      Tags:
+        - Key: Name
+          Value: sg-azurerunner
+
+  ##################################################################################
+  ##################################################################################
+  AzureRunnerLaunchTemplate:
+    Type: AWS::EC2::LaunchTemplate
+    Properties:
+      LaunchTemplateName: !Ref AzureRunnerLaunchTemplateName
+      LaunchTemplateData:
+        BlockDeviceMappings:
+          - DeviceName: !Ref DeviceName
+            Ebs:
+              DeleteOnTermination: !Ref DeleteOnTermination
+              Encrypted: true #STANDED AES 256 ENCRYPTION ENABLED
+              VolumeSize: !Ref VolumeSize
+              VolumeType: !Ref VolumeType
+        EbsOptimized: !Ref EbsOptimized
+        IamInstanceProfile:
+          Arn: !GetAtt AzureDevOpsInstanceProfile.Arn
+        ImageId: !Ref UbuntuImageAMI
+        InstanceType: !Ref AzureDevOpsRunnerInstanceType
+        Monitoring:
+          Enabled: true
+        SecurityGroupIds:
+          - !GetAtt AzureDevOpsSecurityGroup.GroupId
+
+        UserData:
+          Fn::Base64: !Sub |
+            #!bin/bash
+
+            apt-get update
+            apt-get upgrade
+
+            apt -y install amazon-ecr-credential-helper
+            apt-get -y install \
+            apt-transport-https \
+            ca-certificates \
+            curl \
+            gnupg-agent \
+            software-properties-common
+            curl -fsSL https://download.docker.com/linux/ubuntu/gpg | apt-key add -
+            apt-key fingerprint 0EBFCD88
+            add-apt-repository \
+            "deb [arch=amd64] https://download.docker.com/linux/ubuntu \
+            $(lsb_release -cs) \
+            stable"
+            apt-get update
+            apt-get -y install docker-ce docker-ce-cli containerd.io
+            systemctl enable docker
+            systemctl start docker
+
+            apt-get install -y gzip zip unzip
+            curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+            unzip awscliv2.zip
+            ./aws/install
+
+            apt-get -y install jq
+            apt-get -y install python3
+            apt-get -y install python3-pip
+            pip3 install yq
+
+
+            su ubuntu -c 'mkdir /home/ubuntu/azureagent;'
+            cd /home/ubuntu/azureagent
+            su ubuntu -c 'wget "https://vstsagentpackage.azureedge.net/agent/2.183.1/vsts-agent-linux-x64-2.183.1.tar.gz";tar zxvf vsts-agent-linux-x64-2.183.1.tar.gz'
+
+            su ubuntu -c 'TOKEN=$(aws ssm get-parameters --name "/devops/azure/runner/token" --with-decryption --query "Parameters[0].Value" | jq -r);./config.sh \
+            --unattended \
+            --url https://dev.azure.com/BridgestoneAmericas \
+            --auth pat \
+            --token $TOKEN \
+            --pool AWSCTProd \
+            --agent agent-base-lab-`head /dev/urandom | tr -dc A-Za-z0-9 | head -c 6`'
+
+            ./svc.sh install ubuntu
+            ./svc.sh start ubuntu
+
+            usermod -aG docker ubuntu
+            service docker restart 
+            cd ~;mkdir .docker;echo "{\"credsStore\": \"ecr-login\"}" >> .docker/config.json;
+            su ubuntu -c 'cd ~;mkdir .docker;echo "{\"credsStore\": \"ecr-login\"}" >> .docker/config.json;'
+            reboot
+
+  ##################################################################################
+  ##################################################################################
+  AutoScalingGroup:
+    Type: AWS::AutoScaling::AutoScalingGroup
+    Properties:
+      AutoScalingGroupName: !Ref AutoScalingGroupName
+      Cooldown: !Ref Cooldown
+      DesiredCapacity: !Ref DesiredCapacity
+      HealthCheckGracePeriod: 5 # The amount of time, in seconds, that Amazon EC2 Auto Scaling waits before checking the health status of an EC2 instance that has come into service.
+      HealthCheckType: ELB
+      LaunchTemplate:
+        LaunchTemplateId: !Ref AzureRunnerLaunchTemplate
+        Version: !Ref AzureRunnerLaunchTemplateVersion
+      MaxSize: !Ref MaxSize
+      MinSize: !Ref MinSize
+      Tags:
+        - Key: Name
+          Value: Azure-Runner
+          PropagateAtLaunch: true
+      TerminationPolicies:
+        - Default
+      VPCZoneIdentifier:
+        - !Ref UbuntuSubnetA
+        - !Ref UbuntuSubnetB
+  ##################################################################################
+  ##IAM INSTANCE PROFILE CREATION -- REFERENCES SSM ROLE -- FOR EC2 TO BE ACCESSED THROUGH SSM##
+
+  AzureDevOpsInstanceProfile:
+    Type: "AWS::IAM::InstanceProfile"
+    Properties:
+      InstanceProfileName: !Ref AzureDevOpsMasterRole
+      Roles:
+        - !Ref AzureDevOpsMasterRole
+
+  ##SSM ROLE CREATION FOR EC2 ACCESS THROUGH SSM -- SECURITY BEST PRACTICE##
+
+  AzureDevOpsMasterRole:
+    Type: "AWS::IAM::Role"
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - ec2.amazonaws.com
+            Action:
+              - "sts:AssumeRole"
+      ManagedPolicyArns:
+        - "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
+      Policies:
+        - PolicyName: "Allow-Assume-Role"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: "Allow"
+                Action:
+                  - sts:AssumeRole
+                Resource: arn:aws:iam::*:role/AzureDevOpsMemberRole
+        - PolicyName: "Allow-Code-Artifact"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: "Allow"
+                Action:
+                  - sts:GetServiceBearerToken
+                Resource: "*"
+              - Effect: "Allow"
+                Action:
+                  - codeartifact:GetAuthorizationToken
+                  - codeartifact:ReadFromRepository
+                  - codeartifact:GetRepositoryEndpoint
+                Resource:
+                  - !Sub arn:aws:codeartifact:*:${SharedServicesAccountId}:domain/devops-core
+                  - !Sub arn:aws:codeartifact:*:${SharedServicesAccountId}:repository/*/*
+        - PolicyName: "ReadUploadECR"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: "Allow"
+                Action:
+                  - ecr:DescribeImageScanFindings
+                  - ecr:GetLifecyclePolicyPreview
+                  - ecr:GetDownloadUrlForLayer
+                  - ecr:GetAuthorizationToken
+                  - ecr:ListTagsForResource
+                  - ecr:UploadLayerPart
+                  - ecr:ListImages
+                  - ecr:PutImage
+                  - ecr:UntagResource
+                  - ecr:BatchGetImage
+                  - ecr:CompleteLayerUpload
+                  - ecr:DescribeImages
+                  - ecr:TagResource
+                  - ecr:InitiateLayerUpload
+                  - ecr:BatchCheckLayerAvailability
+                  - ecr:GetRepositoryPolicy
+                  - ecr:GetLifecyclePolicy
+                Resource: "*"
+      RoleName: AzureDevOpsMasterRole
+      Description: EC2 IAM role for SSM access
+  DevopsArtifactDomain:
+    Type: AWS::CodeArtifact::Domain
+    Condition: CreateCowabungaECR
+    Properties:
+      DomainName: !Ref DevOpsArtifactDomainName
+
+  # Roles for DevSecOps Solution
+
+  ServerlessPyPiRepo:
+    Type: AWS::CodeArtifact::Repository
+    Condition: CreateCowabungaECR
+    Properties:
+      Description: Artifact store for all py packages
+      DomainName: !GetAtt DevopsArtifactDomain.Name
+      DomainOwner: !Ref AWS::AccountId
+      RepositoryName: pypi-store
+      ExternalConnections:
+        - public:pypi
+
+  ServerlessNPMRepo:
+    Type: AWS::CodeArtifact::Repository
+    Condition: CreateCowabungaECR
+    Properties:
+      Description: Artifact store for all npm packages
+      DomainName: !GetAtt DevopsArtifactDomain.Name
+      DomainOwner: !Ref AWS::AccountId
+      RepositoryName: npm-store
+      ExternalConnections:
+        - public:npmjs
+
+  ServerlessArtifactStore:
+    Type: AWS::CodeArtifact::Repository
+    Condition: CreateCowabungaECR
+    Properties:
+      Description: Artifact store for all serverless applications
+      DomainName: !GetAtt DevopsArtifactDomain.Name
+      DomainOwner: !Ref AWS::AccountId
+      RepositoryName: serverless-applications
+      Upstreams:
+        - !GetAtt ServerlessPyPiRepo.Name
+        - !GetAtt ServerlessNPMRepo.Name
+
+  CowabungaECR:
+    Type: AWS::ECR::Repository
+    Condition: CreateCowabungaECR
+    Properties:
+      ImageScanningConfiguration:
+        scanOnPush: "true"
+      ImageTagMutability: MUTABLE
+      RepositoryName: serverless-pipelines
+      RepositoryPolicyText:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: AllowPushPull
+            Effect: Allow
+            Principal:
+              AWS:
+                - !GetAtt AzureDevOpsMasterRole.Arn
+            Action:
+              - ecr:DescribeImageScanFindings
+              - ecr:GetLifecyclePolicyPreview
+              - ecr:GetDownloadUrlForLayer
+              - ecr:GetAuthorizationToken
+              - ecr:ListTagsForResource
+              - ecr:UploadLayerPart
+              - ecr:ListImages
+              - ecr:PutImage
+              - ecr:UntagResource
+              - ecr:BatchGetImage
+              - ecr:CompleteLayerUpload
+              - ecr:DescribeImages
+              - ecr:TagResource
+              - ecr:InitiateLayerUpload
+              - ecr:BatchCheckLayerAvailability
+              - ecr:GetRepositoryPolicy
+              - ecr:GetLifecyclePolicy
+  LotusECR:
+    Type: AWS::ECR::Repository
+    Condition: CreateLotusECR
+    Properties:
+      ImageScanningConfiguration:
+        scanOnPush: "true"
+      ImageTagMutability: MUTABLE
+      RepositoryName: ct-customizations-pipeline
+      RepositoryPolicyText:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: AllowPushPull
+            Effect: Allow
+            Principal:
+              AWS:
+                - !GetAtt AzureDevOpsMasterRole.Arn
+            Action:
+              - ecr:DescribeImageScanFindings
+              - ecr:GetLifecyclePolicyPreview
+              - ecr:GetDownloadUrlForLayer
+              - ecr:GetAuthorizationToken
+              - ecr:ListTagsForResource
+              - ecr:UploadLayerPart
+              - ecr:ListImages
+              - ecr:PutImage
+              - ecr:UntagResource
+              - ecr:BatchGetImage
+              - ecr:CompleteLayerUpload
+              - ecr:DescribeImages
+              - ecr:TagResource
+              - ecr:InitiateLayerUpload
+              - ecr:BatchCheckLayerAvailability
+              - ecr:GetRepositoryPolicy
+              - ecr:GetLifecyclePolicy
+  DragonFlyECR:
+    Type: AWS::ECR::Repository
+    Condition: CreateDragonFlyECR
+    Properties:
+      ImageScanningConfiguration:
+        scanOnPush: "true"
+      ImageTagMutability: MUTABLE
+      RepositoryName: cloudformation-pipeline
+      RepositoryPolicyText:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: AllowPushPull
+            Effect: Allow
+            Principal:
+              AWS:
+                - !GetAtt AzureDevOpsMasterRole.Arn
+            Action:
+              - ecr:DescribeImageScanFindings
+              - ecr:GetLifecyclePolicyPreview
+              - ecr:GetDownloadUrlForLayer
+              - ecr:GetAuthorizationToken
+              - ecr:ListTagsForResource
+              - ecr:UploadLayerPart
+              - ecr:ListImages
+              - ecr:PutImage
+              - ecr:UntagResource
+              - ecr:BatchGetImage
+              - ecr:CompleteLayerUpload
+              - ecr:DescribeImages
+              - ecr:TagResource
+              - ecr:InitiateLayerUpload
+              - ecr:BatchCheckLayerAvailability
+              - ecr:GetRepositoryPolicy
+              - ecr:GetLifecyclePolicy
+
+  PangolinECR:
+    Type: AWS::ECR::Repository
+    Condition: CreatePangolinECR
+    Properties:
+      ImageScanningConfiguration:
+        scanOnPush: "true"
+      ImageTagMutability: MUTABLE
+      RepositoryName: golden-ami-pipeline
+      RepositoryPolicyText:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: AllowPushPull
+            Effect: Allow
+            Principal:
+              AWS:
+                - !GetAtt AzureDevOpsMasterRole.Arn
+            Action:
+              - ecr:DescribeImageScanFindings
+              - ecr:GetLifecyclePolicyPreview
+              - ecr:GetDownloadUrlForLayer
+              - ecr:GetAuthorizationToken
+              - ecr:ListTagsForResource
+              - ecr:UploadLayerPart
+              - ecr:ListImages
+              - ecr:PutImage
+              - ecr:UntagResource
+              - ecr:BatchGetImage
+              - ecr:CompleteLayerUpload
+              - ecr:DescribeImages
+              - ecr:TagResource
+              - ecr:InitiateLayerUpload
+              - ecr:BatchCheckLayerAvailability
+              - ecr:GetRepositoryPolicy
+              - ecr:GetLifecyclePolicy

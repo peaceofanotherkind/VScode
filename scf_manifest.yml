@@ -1,0 +1,30 @@
+---
+# Default region for deploying Custom Control Tower: Code Pipeline, Step functions, Lambda, SSM parameters, and StackSets
+region: us-east-1
+version: 2020-01-01
+
+tag_policies:
+  - name: Bridgestone-tag
+    description: Bridgestone Americas tag policies
+    policy_file: policies/tag/tag-policy.json
+    # Apply to the following OU(s)
+    apply_to_accounts_in_ou: # :type: list
+      - Infrastructure
+      - Core
+      - Production
+      - Development
+      - Non-Production
+      - POC
+
+backup_policies:
+  - name: Bridgestone-backup
+    description: Bridgestone Americas backup policies
+    policy_file: policies/backup/backup-policy.json
+    # Apply to the following OU(s)
+    apply_to_accounts_in_ou: # :type: list
+      - Infrastructure
+      - Core
+      - Production
+      - Development
+      - Non-Production
+      - POC
