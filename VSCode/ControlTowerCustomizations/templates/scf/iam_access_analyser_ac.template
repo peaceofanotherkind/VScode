@@ -1,0 +1,10 @@
+#might have to enable it once in the main account first
+
+AWSTemplateFormatVersion: 2010-09-09
+Description: Enables IAM Access Analyzer
+Resources:
+  Analyzer:
+    Type: 'AWS::AccessAnalyzer::Analyzer'
+    Properties:
+      AnalyzerName: !Sub 'AccessAnalyzer-${AWS::Region}-${AWS::AccountId}'
+      Type: ACCOUNT

@@ -1,0 +1,22 @@
+[
+    {
+        "ParameterKey": "EBSKeyAlias",
+        "ParameterValue": "bridgestone-ec2-default-v1"
+    },
+    {
+        "ParameterKey": "KeyAdminRoleName",
+        "ParameterValue": "DefaultEBSKeyAdmin"
+    },
+    {
+        "ParameterKey": "MaximumExecutionFrequency",
+        "ParameterValue": "TwentyFour_Hours"
+    },
+    {
+        "ParameterKey": "CTSBOrgId",
+        "ParameterValue": "o-crwgg2cs9e"
+    },
+    {
+        "ParameterKey": "ProdOrgId",
+        "ParameterValue": "o-w7upbvgl57"
+    }
+]

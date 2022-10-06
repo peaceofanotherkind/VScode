@@ -1,0 +1,138 @@
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Sid": "ServiceRegionLock",
+            "NotAction": [
+                "iam:*",
+                "organizations:*",
+                "route53:*",
+                "budgets:*",
+                "waf:*",
+                "cloudfront:*",
+                "globalaccelerator:*",
+                "importexport:*",
+                "support:*",
+                "health:*",
+                "route53domains:*"
+            ],
+            "Resource": "*",
+            "Effect": "Deny",
+            "Condition": {
+                "StringNotEquals": {
+                    "aws:RequestedRegion": [
+                        "us-east-1",
+                        "us-west-2",
+                        "us-east-2"
+                    ]
+                },
+                "ArnNotLike": {
+                    "aws:PrincipalARN": [
+                        "arn:aws:iam::*:role/AWSControlTowerAdmin",
+                        "arn:aws:iam::*:role/AWSControlTowerExecution"
+                    ] 
+                }
+            }
+        },
+        {
+            "Sid": "DenyPublicReadACL",
+            "Effect": "Deny",
+            "Action": [
+                "s3:PutObject",
+                "s3:PutObjectAcl"
+            ],
+            "Resource": "arn:aws:s3:::*/*",
+            "Condition": {
+                "StringEquals": {
+                    "s3:x-amz-acl": [
+                        "public-read",
+                        "public-read-write",
+                        "authenticated-read"
+                    ]
+                }
+            }
+        },
+        {
+            "Sid": "DenyPublicReadGrant",
+            "Effect": "Deny",
+            "Action": [
+                "s3:PutObject",
+                "s3:PutObjectAcl"
+            ],
+            "Resource": "arn:aws:s3:::*/*",
+            "Condition": {
+                "StringLike": {
+                    "s3:x-amz-grant-read": [
+                        "*http://acs.amazonaws.com/groups/global/AllUsers*",
+                        "*http://acs.amazonaws.com/groups/global/AuthenticatedUsers*"
+                    ]
+                }
+            }
+        },
+        {
+            "Sid": "PreventIAMActionsOnProtectedRoles",
+            "Effect": "Deny",
+            "NotAction": [
+                "iam:Get*",
+                "iam:List*",
+                "sts:AssumeRole"
+            ],
+            "Resource": [
+                "arn:aws:iam::*:role/bfusa-*"
+            ],
+            "Condition": {
+                "ArnNotLike": {
+                    "aws:PrincipalARN": [
+                        "arn:aws:iam::*:role/AWSControlTowerAdmin",
+                        "arn:aws:iam::*:role/AWSControlTowerExecution",
+                        "arn:aws:iam::*:role/BridgestoneAmericas-Jenkins-AutomationRole"
+                    ] 
+                }
+            }
+        },
+        {
+            "Sid": "PreventIAMActionsOnProtectedPolicies",
+            "Effect": "Deny",
+            "NotAction": [
+                "iam:Get*",
+                "iam:List*",
+                "sts:AssumeRole"
+            ],
+            "Resource": [
+                "arn:aws:iam::*:policy/bfusa*",
+                "arn:aws:iam::*:policy/BFUSA*",
+                "arn:aws:iam::*:policy/BridgestoneAmericas*"
+            ],
+            "Condition": {
+                "ArnNotLike": {
+                    "aws:PrincipalARN": [
+                        "arn:aws:iam::*:role/AWSControlTowerAdmin",
+                        "arn:aws:iam::*:role/AWSControlTowerExecution",
+                        "arn:aws:iam::*:role/BridgestoneAmericas-Jenkins-AutomationRole"
+                    ] 
+                }
+            }
+        },
+        {
+            "Sid": "PreventOrgLeave",
+            "Action": [
+                "organizations:LeaveOrganization"
+            ],
+            "Resource": "*",
+            "Effect": "Deny"
+        },
+        {
+            "Sid": "DisableRoot",
+            "Action": "*",
+            "Resource": "*",
+            "Effect": "Deny",
+            "Condition": {
+                "StringLike": {
+                    "aws:PrincipalArn": [
+                        "arn:aws:iam::*:root"
+                    ]
+                }
+            }
+        }
+    ]
+}

@@ -1,0 +1,151 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "GuardPutAccountPublicAccessBlock",
+      "Effect": "Deny",
+      "Action": "s3:PutAccountPublicAccessBlock",
+      "Resource": "arn:aws:s3:::*"
+    },
+    {
+      "Sid": "GuardEMRPutBlockPublicAccess",
+      "Effect": "Deny",
+      "Action": "elasticmapreduce:PutBlockPublicAccessConfiguration",
+      "Resource": "*"
+    },
+    {
+      "Sid": "GuardGlacierDeletion",
+      "Effect": "Deny",
+      "Action": [
+        "glacier:DeleteArchive",
+        "glacier:DeleteVault"
+      ],
+      "Resource": "arn:aws:glacier:*:*:vaults/*"
+    },
+    {
+      "Sid": "GuardKMSActions",
+      "Effect": "Deny",
+      "Action": [
+        "kms:DeleteAlias",
+        "kms:DeleteImportedKeyMaterial",
+        "kms:ScheduleKeyDeletion"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "DenyPublicReadACL",
+      "Effect": "Deny",
+      "Action": [
+          "s3:PutObject",
+          "s3:PutObjectAcl"
+      ],
+      "Resource": "arn:aws:s3:::*/*",
+      "Condition": {
+          "StringEquals": {
+              "s3:x-amz-acl": [
+                  "public-read",
+                  "public-read-write",
+                  "authenticated-read"
+              ]
+          }
+      }
+    },
+    {
+      "Sid": "DenyPublicWriteGrant",
+      "Effect": "Deny",
+      "Action": [
+          "s3:PutObject",
+          "s3:PutObjectAcl"
+      ],
+      "Resource": "arn:aws:s3:::*/*",
+      "Condition": {
+          "StringLike": {
+              "s3:x-amz-grant-write": [
+                  "*http://acs.amazonaws.com/groups/global/AllUsers*",
+                  "*http://acs.amazonaws.com/groups/global/AuthenticatedUsers*"
+              ]
+          }
+      }
+    },
+    {
+        "Sid": "RequireRDSEncryption",
+        "Effect": "Deny",
+        "Action": [
+            "rds:CreateDBInstance"
+        ],
+        "Resource": [
+            "*"
+        ],
+        "Condition": {
+            "ForAnyValue:StringEquals": {
+                "rds:DatabaseEngine": [
+                    "mariadb",
+                    "mysql",
+                    "oracle-ee",
+                    "oracle-se2",
+                    "oracle-se1",
+                    "oracle-se",
+                    "postgres",
+                    "sqlserver-ee",
+                    "sqlserver-se",
+                    "sqlserver-ex",
+                    "sqlserver-web"
+                ]
+            },
+            "Bool": {
+                "rds:StorageEncrypted": "false"
+            }
+        }
+    },
+    {
+        "Sid": "RequireAuroraEncryption",
+        "Effect": "Deny",
+        "Action": [
+            "rds:CreateDBCluster"
+        ],
+        "Resource": [
+            "*"
+        ],
+        "Condition": {
+            "Bool": {
+                "rds:StorageEncrypted": "false"
+            }
+        }
+    },
+    {
+      
+      "Sid": "ServiceBlacklist",
+      "Action": [
+          "dax:*",
+          "neptune-db:*",
+          "a4b:*",
+          "alexa-appkit:*",
+          "alexa-connecthome:*",
+          "amazonmq:*",
+          "chime:*",
+          "deeplens:*",
+          "diode:*",
+          "elastictranscoder:*",
+          "freertos:*",
+          "gamelift:*",
+          "greengrass:*",
+          "iot:*",
+          "iotanalytics:*",
+          "iotthingsgraph:*",
+          "jellyfish:*",
+          "lex:*",
+          "lightsail:*",
+          "mediaconnect:*",
+          "mediaconvert:*",
+          "mediapackage:*",
+          "mediastore:*",
+          "mediatailor:*",
+          "poinpoint:*",
+          "polly:*",
+          "robomaker:*"
+      ],
+      "Resource": "*",
+      "Effect": "Deny"
+    }
+  ]
+}
